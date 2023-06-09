@@ -1,5 +1,5 @@
  /*
-  * Copyright (C) 2019-2022 HERE Europe B.V.
+  * Copyright (C) 2019-2023 HERE Europe B.V.
   *
   * Licensed under the Apache License, Version 2.0 (the "License");
   * you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ package com.here.gestures;
  import com.here.sdk.gestures.TapListener;
  import com.here.sdk.gestures.TwoFingerTapListener;
  import com.here.sdk.mapview.MapCamera;
+ import com.here.sdk.mapview.MapMeasure;
  import com.here.sdk.mapview.MapView;
 
  public class GesturesExample {
@@ -44,7 +45,8 @@ package com.here.gestures;
      public GesturesExample(Context context, MapView mapView) {
          MapCamera camera = mapView.getCamera();
          double distanceInMeters = 1000 * 10;
-         camera.lookAt(new GeoCoordinates(52.520798, 13.409408), distanceInMeters);
+         MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, distanceInMeters);
+         camera.lookAt(new GeoCoordinates(52.520798, 13.409408), mapMeasureZoom);
 
          gestureMapAnimator = new GestureMapAnimator(mapView.getCamera());
 

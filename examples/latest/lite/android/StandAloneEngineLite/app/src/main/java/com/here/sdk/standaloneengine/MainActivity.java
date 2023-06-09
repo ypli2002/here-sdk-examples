@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,13 +19,17 @@
 
 package com.here.sdk.standaloneengine;
 
+import android.content.Context;
 import android.os.Bundle;
-import androidx.appcompat.app.AppCompatActivity;
 import android.util.Log;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AppCompatActivity;
+
 import com.here.sdk.core.GeoCoordinates;
 import com.here.sdk.core.LanguageCode;
+import com.here.sdk.core.engine.SDKNativeEngine;
+import com.here.sdk.core.engine.SDKOptions;
 import com.here.sdk.core.errors.InstantiationErrorException;
 import com.here.sdk.search.CategoryQuery;
 import com.here.sdk.search.Place;
@@ -53,6 +57,10 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Usually, you need to initialize the HERE SDK only once during the lifetime of an application.
+        initializeHERESDK();
+
         setContentView(R.layout.activity_main);
         infoTextview = findViewById(R.id.infoTextView);
 
@@ -66,11 +74,26 @@ public class MainActivity extends AppCompatActivity {
         searchForCategories();
     }
 
+    private void initializeHERESDK() {
+        // Set your credentials for the HERE SDK.
+        String accessKeyID = "YOUR_ACCESS_KEY_ID";
+        String accessKeySecret = "YOUR_ACCESS_KEY_SECRET";
+        SDKOptions options = new SDKOptions(accessKeyID, accessKeySecret);
+        try {
+            Context context = this;
+            SDKNativeEngine.makeSharedInstance(context, options);
+        } catch (InstantiationErrorException e) {
+            throw new RuntimeException("Initialization of HERE SDK failed: " + e.error.name());
+        }
+    }
+
     private void searchForCategories() {
         List<PlaceCategory> categoryList = new ArrayList<>();
         categoryList.add(new PlaceCategory(PlaceCategory.EAT_AND_DRINK));
         categoryList.add(new PlaceCategory(PlaceCategory.SHOPPING_ELECTRONICS));
-        CategoryQuery categoryQuery = new CategoryQuery(categoryList, new GeoCoordinates(52.520798, 13.409408));
+
+        CategoryQuery.Area queryArea = new CategoryQuery.Area(new GeoCoordinates(52.520798, 13.409408));
+        CategoryQuery categoryQuery = new CategoryQuery(categoryList, queryArea);
 
         SearchOptions searchOptions = new SearchOptions();
         searchOptions.languageCode = LanguageCode.EN_US;
@@ -94,5 +117,24 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+    }
+
+    @Override
+    protected void onDestroy() {
+        disposeHERESDK();
+        super.onDestroy();
+    }
+    
+    private void disposeHERESDK() {
+        // Free HERE SDK resources before the application shuts down.
+        // Usually, this should be called only on application termination.
+        // Afterwards, the HERE SDK is no longer usable unless it is initialized again.
+        SDKNativeEngine sdkNativeEngine = SDKNativeEngine.getSharedInstance();
+        if (sdkNativeEngine != null) {
+            sdkNativeEngine.dispose();
+            // For safety reasons, we explicitly set the shared instance to null to avoid situations,
+            // where a disposed instance is accidentally reused.
+            SDKNativeEngine.setSharedInstance(null);
+        }
     }
 }

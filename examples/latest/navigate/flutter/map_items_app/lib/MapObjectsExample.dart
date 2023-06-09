@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import 'package:here_sdk/core.errors.dart';
 import 'package:here_sdk/mapview.dart';
 
 class MapObjectsExample {
-  final double _distanceInMeters = 1000 * 10;
   final GeoCoordinates _berlinGeoCoordinates = new GeoCoordinates(52.51760485151816, 13.380312380535472);
 
   final MapScene _mapScene;
@@ -37,15 +36,15 @@ class MapObjectsExample {
       : _mapScene = hereMapController.mapScene,
         _mapCamera = hereMapController.camera {
     double distanceToEarthInMeters = 5000;
+    MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
     hereMapController.camera
-        .lookAtPointWithDistance(GeoCoordinates(52.51760485151816, 13.380312380535472), distanceToEarthInMeters);
+        .lookAtPointWithMeasure(GeoCoordinates(52.51760485151816, 13.380312380535472), mapMeasureZoom);
   }
 
   void showMapPolyline() {
     clearMap();
     // Move map to expected location.
-    _mapCamera.flyToWithOptionsAndDistance(
-        _berlinGeoCoordinates, _distanceInMeters, new MapCameraFlyToOptions.withDefaults());
+    _flyTo(_berlinGeoCoordinates);
 
     _mapPolyline = _createPolyline();
     _mapScene.addMapPolyline(_mapPolyline!);
@@ -54,8 +53,7 @@ class MapObjectsExample {
   void showMapArrow() {
     clearMap();
     // Move map to expected location.
-    _mapCamera.flyToWithOptionsAndDistance(
-        _berlinGeoCoordinates, _distanceInMeters, new MapCameraFlyToOptions.withDefaults());
+    _flyTo(_berlinGeoCoordinates);
 
     _mapArrow = _createMapArrow();
     _mapScene.addMapArrow(_mapArrow!);
@@ -64,8 +62,7 @@ class MapObjectsExample {
   void showMapPolygon() {
     clearMap();
     // Move map to expected location.
-    _mapCamera.flyToWithOptionsAndDistance(
-        _berlinGeoCoordinates, _distanceInMeters, new MapCameraFlyToOptions.withDefaults());
+    _flyTo(_berlinGeoCoordinates);
 
     _mapPolygon = _createPolygon();
     _mapScene.addMapPolygon(_mapPolygon!);
@@ -74,8 +71,7 @@ class MapObjectsExample {
   void showMapCircle() {
     clearMap();
     // Move map to expected location.
-    _mapCamera.flyToWithOptionsAndDistance(
-        _berlinGeoCoordinates, _distanceInMeters, new MapCameraFlyToOptions.withDefaults());
+    _flyTo(_berlinGeoCoordinates);
 
     _mapCircle = _createMapCircle();
     _mapScene.addMapPolygon(_mapCircle!);
@@ -174,5 +170,15 @@ class MapObjectsExample {
     MapPolygon mapPolygon = MapPolygon(geoPolygon, fillColor);
 
     return mapPolygon;
+  }
+
+  void _flyTo(GeoCoordinates geoCoordinates) {
+    GeoCoordinatesUpdate geoCoordinatesUpdate = GeoCoordinatesUpdate.fromGeoCoordinates(geoCoordinates);
+    double distanceToEarthInMeters = 1000 * 8;
+    var mapMeasure = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
+    double bowFactor = 1;
+    MapCameraAnimation animation =
+        MapCameraAnimationFactory.flyToWithZoom(geoCoordinatesUpdate, mapMeasure, bowFactor, Duration(seconds: 3));
+    _mapCamera.startAnimation(animation);
   }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ class RouteCalculator {
     List<Waypoint> waypoints = [startWaypoint, destinationWaypoint];
 
     // A route handle is required for the DynamicRoutingEngine to get updates on traffic-optimized routes.
-    var routingOptions = HERE.CarOptions.withDefaults();
+    var routingOptions = HERE.CarOptions();
     routingOptions.routeOptions.enableRouteHandle = true;
 
     _routingEngine.calculateCarRoute(waypoints, routingOptions, calculateRouteCallback);

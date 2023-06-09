@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,8 @@ class EVRoutingExample {
       : _showDialog = showDialogCallback,
         _hereMapController = hereMapController {
     double distanceToEarthInMeters = 10000;
-    _hereMapController.camera.lookAtPointWithDistance(GeoCoordinates(52.520798, 13.409408), distanceToEarthInMeters);
+    MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
+    _hereMapController.camera.lookAtPointWithMeasure(GeoCoordinates(52.520798, 13.409408), mapMeasureZoom);
 
     try {
       _routingEngine = RoutingEngine();
@@ -94,19 +95,25 @@ class EVRoutingExample {
   }
 
   EVCarOptions _getEVCarOptions() {
-    EVCarOptions evCarOptions = EVCarOptions.withDefaults();
+    EVCarOptions evCarOptions = EVCarOptions();
 
     // The below three options are the minimum you must specify or routing will result in an error.
     evCarOptions.consumptionModel.ascentConsumptionInWattHoursPerMeter = 9;
     evCarOptions.consumptionModel.descentRecoveryInWattHoursPerMeter = 4.3;
     evCarOptions.consumptionModel.freeFlowSpeedTable = {0: 0.239, 27: 0.239, 60: 0.196, 90: 0.238};
 
-    // Ensure that the vehicle does not run out of energy along the way and charging stations are added as additional waypoints.
+    // Must be 0 for isoline calculation.
+    evCarOptions.routeOptions.alternatives = 0;
+
+    // Ensure that the vehicle does not run out of energy along the way
+    // and charging stations are added as additional waypoints.
     evCarOptions.ensureReachability = true;
 
-    // The below options are required when setting the ensureReachability option to true.
+    // The below options are required when setting the ensureReachability option to true
+    // (AvoidanceOptions need to be empty).
+    evCarOptions.avoidanceOptions = AvoidanceOptions();
+    evCarOptions.routeOptions.speedCapInMetersPerSecond = null;
     evCarOptions.routeOptions.optimizationMode = OptimizationMode.fastest;
-    evCarOptions.routeOptions.alternatives = 0;
     evCarOptions.batterySpecifications.connectorTypes = [
       ChargingConnectorType.tesla,
       ChargingConnectorType.iec62196Type1Combo,
@@ -168,11 +175,11 @@ class EVRoutingExample {
 
       print("EVDetails: Section " +
           sectionIndex.toString() +
-          ": Estimated departure battery charge in kWh: " +
+          ": Estimated battery charge in kWh when leaving the departure place: " +
           section.departurePlace.chargeInKilowattHours.toString());
       print("EVDetails: Section " +
           sectionIndex.toString() +
-          ": Estimated arrival battery charge in kWh: " +
+          ": Estimated battery charge in kWh when leaving the arrival place: " +
           section.arrivalPlace.chargeInKilowattHours.toString());
 
       // Only charging stations that are needed to reach the destination are listed below.
@@ -216,10 +223,11 @@ class EVRoutingExample {
     // within a max distance of xx meters from any point of the route.
     int halfWidthInMeters = 200;
     GeoCorridor routeCorridor = GeoCorridor(route.geometry.vertices, halfWidthInMeters);
-    TextQuery textQuery = TextQuery.withCorridorAreaAndAreaCenter(
-        "charging station", routeCorridor, _hereMapController.camera.state.targetCoordinates);
+    TextQueryArea queryArea =
+        TextQueryArea.withCorridor(routeCorridor, _hereMapController.camera.state.targetCoordinates);
+    TextQuery textQuery = TextQuery.withArea("charging station", queryArea);
 
-    SearchOptions searchOptions = SearchOptions.withDefaults();
+    SearchOptions searchOptions = SearchOptions();
     searchOptions.languageCode = LanguageCode.enUs;
     searchOptions.maxItems = 30;
 

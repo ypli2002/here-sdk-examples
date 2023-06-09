@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 HERE Europe B.V.
+ * Copyright (C) 2020-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,17 +18,39 @@
  */
 
 import 'package:flutter/material.dart';
+import 'package:here_sdk/core.errors.dart';
 import 'package:indoor_map_app/geometry_info.dart';
-import 'package:indoor_map_app/indoor_routing_widget.dart';
 import 'package:indoor_map_app/settings_page.dart';
 import 'package:indoor_map_app/venue_engine_widget.dart';
 import 'package:here_sdk/core.dart';
+import 'package:here_sdk/core.engine.dart';
+import 'package:here_sdk/core.errors.dart';
 import 'package:here_sdk/mapview.dart';
 import 'package:here_sdk/venue.dart';
+import 'dart:convert';
+import 'events.dart';
 
 void main() {
-  SdkContext.init(IsolateOrigin.main);
+  // Usually, you need to initialize the HERE SDK only once during the lifetime of an application.
+  _initializeHERESDK();
+
   runApp(MyApp());
+}
+
+void _initializeHERESDK() async {
+  // Needs to be called before accessing SDKOptions to load necessary libraries.
+  SdkContext.init(IsolateOrigin.main);
+
+  // Set your credentials for the HERE SDK.
+  String accessKeyId = "YOUR_ACCESS_KEY_ID";
+  String accessKeySecret = "YOUR_ACCESS_KEY_SECRET";
+  SDKOptions sdkOptions = SDKOptions.withAccessKeySecret(accessKeyId, accessKeySecret);
+
+  try {
+    await SDKNativeEngine.makeSharedInstance(sdkOptions);
+  } on InstantiationException {
+    throw Exception("Failed to initialize the HERE SDK.");
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -45,10 +67,25 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class MainPage extends StatelessWidget {
+class MainPage extends StatefulWidget {
+  const MainPage({super.key});
+
+  @override
+  State<MainPage> createState() => _MainPageState();
+}
+
+class _MainPageState extends State<MainPage> {
   final VenueEngineState _venueEngineState = VenueEngineState();
-  final IndoorRoutingState _indoorRoutingState = IndoorRoutingState();
   final GeometryInfoState _geometryInfoState = GeometryInfoState();
+  late String _venueIdAsString = "";
+  late String _selectedVenue = "Venue Id";
+  List _venueList = ["Venue Id"];
+  bool _isPressed = false;
+
+  @override
+  void initState() {
+    super.initState();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,32 +98,86 @@ class MainPage extends StatelessWidget {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 120,
+            Padding(
               padding: EdgeInsets.only(left: 5, right: 5),
-              // Widget for opening venue by provided ID.
-              child: TextField(
-                  decoration: InputDecoration(border: InputBorder.none, hintText: 'Enter a venue ID'),
-                  onSubmitted: (text) {
-                    try {
-                      // Try to parse a venue id.
-                      int venueId = int.parse(text);
-                      // Select a venue by id.
-                      _venueEngineState.selectVenue(venueId);
-                    } on FormatException catch (_) {
-                      print("Venue ID should be a number!");
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  ValueListenableBuilder<List>(
+                    builder: (BuildContext context, List value, Widget? child) {
+                      _venueList = value;
+                      return DropdownButton(
+                        hint: Text("MapList"),
+                        value: _selectedVenue,
+                        items: _venueList.map((item) {
+                          return DropdownMenuItem(
+                            child: Text(item),
+                            value: item,
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedVenue = "$value";
+                            _venueIdAsString = _selectedVenue;
+                            _isPressed = false;
+                            mapLoading.isMapLoading.value = false;
+                          });
+                        },
+                      );
+                    },
+                    valueListenable: listEventHandler.updatedList,
+                    // The child parameter is most helpful if the child is
+                    // expensive to build and does not depend on the value from
+                    // the notifier.
+                  ),
+                ],
+              ),
+            ),
+            Container(
+                margin: EdgeInsets.all(4),
+                width: 100,
+                child: ValueListenableBuilder<bool>(
+                  builder: (BuildContext context, bool value, Widget? child) {
+                    if(value) {
+                      _isPressed = false;
                     }
-                  }),
+                    return ElevatedButton(
+                      onPressed: mapLoading.isMapLoading.value ? null: () async {
+                        if(_isPressed) {
+                          setState(() => _isPressed = false);
+                        }
+                        else {
+                          setState(() => _isPressed = true);
+                        }
+
+                        try {
+                          // Try to parse a venue id.
+                          int venueId = int.parse(_venueIdAsString);
+                          // Select a venue by id.
+                          _venueEngineState.selectVenue(venueId);
+                        } on FormatException catch (_) {
+                          print("Venue ID should be a number!");
+                        }
+                      },
+                      child: Text(_isPressed ? 'Loading...' : 'Go'),
+                    );
+                  },
+                  valueListenable: mapLoading.isMapLoading,
+                  // The child parameter is most helpful if the child is
+                  // expensive to build and does not depend on the value from
+                  // the notifier.
+                ),
             ),
             Container(
               margin: EdgeInsets.all(4),
               width: kMinInteractiveDimension,
-              child: FlatButton(
-                color: Colors.white,
-                padding: EdgeInsets.zero,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    padding: EdgeInsets.zero
+                ),
                 child: Icon(Icons.search, color: Colors.black, size: kMinInteractiveDimension),
                 onPressed: () {
-                  _venueEngineState.getVenuesControllerState().setOpen(false);
                   final venueSearchState = _venueEngineState.getVenueSearchState();
                   venueSearchState.setOpen(!venueSearchState.isOpen());
                 },
@@ -95,42 +186,17 @@ class MainPage extends StatelessWidget {
             Container(
               margin: EdgeInsets.all(4),
               width: kMinInteractiveDimension,
-              child: FlatButton(
-                color: Colors.white,
-                padding: EdgeInsets.zero,
-                child: Icon(Icons.directions, color: Colors.black, size: kMinInteractiveDimension),
-                onPressed: () {
-                  _indoorRoutingState.isEnabled = !_indoorRoutingState.isEnabled;
-                },
-              ),
-            ),
-            Container(
-              margin: EdgeInsets.all(4),
-              width: kMinInteractiveDimension,
-              child: FlatButton(
-                color: Colors.white,
-                padding: EdgeInsets.zero,
-                child: Icon(Icons.edit, color: Colors.black, size: kMinInteractiveDimension),
-                onPressed: () {
-                  _venueEngineState.getVenueSearchState().setOpen(false);
-                  final venuesState = _venueEngineState.getVenuesControllerState();
-                  venuesState.setOpen(!venuesState.isOpen());
-                },
-              ),
-            ),
-            Container(
-              margin: EdgeInsets.all(4),
-              width: kMinInteractiveDimension,
-              child: FlatButton(
-                color: Colors.white,
-                padding: EdgeInsets.zero,
+              child: TextButton(
+                style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    padding: EdgeInsets.zero
+                ),
                 child: Icon(Icons.settings, color: Colors.black, size: kMinInteractiveDimension),
                 onPressed: () => Navigator.pushNamed(context, '/settings'),
               ),
             )
           ],
         ),
-        IndoorRoutingWidget(state: _indoorRoutingState),
         Expanded(
           child: Stack(children: <Widget>[
             // Add a HERE map.
@@ -155,15 +221,22 @@ class MainPage extends StatelessWidget {
       }
 
       const double distanceToEarthInMeters = 500;
-      hereMapController.camera.lookAtPointWithDistance(GeoCoordinates(52.530932, 13.384915), distanceToEarthInMeters);
+      MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
+      hereMapController.camera.lookAtPointWithMeasure(GeoCoordinates(52.530932, 13.384915), mapMeasureZoom);
 
       // Hide the extruded building layer, so that it does not overlap
       // with the venues.
-      hereMapController.mapScene.setLayerVisibility(MapSceneLayers.extrudedBuildings, VisibilityState.hidden);
+      hereMapController.mapScene.disableFeatures([MapFeatures.extrudedBuildings]);
+
       // Create a venue engine object. Once the initialization is done,
       // a callback will be called.
-      var venueEngine = VenueEngine(_onVenueEngineCreated);
-      _venueEngineState.set(hereMapController, venueEngine, _indoorRoutingState, _geometryInfoState);
+      var venueEngine;
+      try {
+        venueEngine = VenueEngine(_onVenueEngineCreated);
+        _venueEngineState.set(hereMapController, venueEngine, _geometryInfoState);
+      } on InstantiationException catch(e){
+        print('error caught: $e');
+      }
     });
   }
 

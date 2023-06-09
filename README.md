@@ -1,9 +1,14 @@
 # HERE SDK 4.x (Lite, Explore & Navigate Edition) - Examples for Android, iOS and Flutter
+
 ![License](https://img.shields.io/badge/license-Apache%202-blue)
 ![Platform](https://img.shields.io/badge/platform-Android-green.svg)
 ![Language](https://img.shields.io/badge/language-Java%208-orange.svg)
 ![Platform](https://img.shields.io/badge/platform-iOS-green.svg)
-![Language](https://img.shields.io/badge/language-Swift%205.1.2-orange.svg)
+![Language](https://img.shields.io/badge/language-Swift%205.3.2-orange.svg)
+
+In this repository you can find the [latest example apps](examples/latest) that show key features of the HERE SDK in ready-to-use applications.
+
+## About the HERE SDK
 
 The [HERE SDK](https://developer.here.com/products/here-sdk) enables you to build powerful location-aware applications. Explore maps that are fast and smooth to interact with, pan/zoom across map views of varying resolutions, and enable the display of various elements such as routes and POIs on highly customizable map views.
 
@@ -21,32 +26,39 @@ For an overview of the existing features, please check the _Developer's Guide_ f
 
 > For now, the _Navigate Edition_ is only available upon request. Please contact your HERE representative to receive access including a set of evaluation credentials.
 
-## List of Available Example Apps (Version 4.10.4.0)
-In this repository you can find the [latest example apps](examples/latest) that show key features of the HERE SDK in ready-to-use applications:
+## List of Available Example Apps (Version 4.14.3.0)
 
 - **HelloMap**: Shows the classic 'Hello World'.
+- **HelloMapKotlin**: Shows the classic 'Hello World' using Kotlin language (Android only).
 - **HelloMapWithStoryboard**: Shows the classic 'Hello World' using a Storyboard (iOS only).
+- **HelloMapAndroidAuto**: Shows how to integrate Android Auto into the _HelloMap_ app to show a map on an in-car head unit display (Android only). Exclusively available for the _Explore Edition_ and the _Navigate Edition_.
+- **HelloMapCarPlay**: Shows how CarPlay can be integrated into the _HelloMap_ app to display a map on an in-car head unit display (iOS only). Exclusively available for the _Explore Edition_ and the _Navigate Edition_.
 - **Camera**: Shows how to change the target and the target anchor point and how to move to another location using custom map animations.
-- **CustomMapStyles**: Shows how to load custom map schemes made with the _HERE Style Editor_. Exclusively available for the _Explore Edition_ and the _Navigate Edition_).
-- **CustomRasterLayers**: Shows how to load custom raster layers. Exclusively available for the _Explore Edition_ and the _Navigate Edition_).
+- **CameraKeyframeTracks**: Shows how to do custom camera animations with keyframe tracks.
+- **CustomMapStyles**: Shows how to load custom map schemes made with the _HERE Style Editor_. Exclusively available for the _Explore Edition_ and the _Navigate Edition_.
+- **CustomRasterLayers**: Shows how to load custom raster layers. Exclusively available for the _Explore Edition_ and the _Navigate Edition_.
 - **Gestures**: Shows how to handle gestures.
 - **OfflineMaps**: Shows how the HERE SDK can work fully offline and how offline map data can be downloaded for continents and countries. Exclusively available for the _Navigate Edition_.
 - **MapItems**: Shows how to add circles, polygons and polylines, native views, 2D and 3D map markers to locate POIs (and more) on the map. 3D map markers are exclusively available for the _Explore and Navigate Editions_.
+- **MultiDisplays**: Shows how a HERE SDK map can be shown on two separate displays using Android's Multi-Display API. Exclusively available for the _Explore Edition_ and the _Navigate Edition_.
 - **CartoPOIPicking**: Shows how to pick embedded map markers with extended place details. Embedded map markers are already visible on every map, by default. This app is exclusively available for the _Explore and Navigate Editions_.
 - **Routing**: Shows how to calculate routes and add them to the map.
 - **RoutingHybrid**: Shows how to calculate routes and add them to the map. Also shows how to calculate routes offline, when no internet connection is available. Exclusively available for the _Navigate Edition_.
 - **EVRouting**: Shows how to calculate routes for _electric vehicles_ and how to calculate the area of reach with _isoline routing_. Also shows how to search along a route.
 - **Public Transit**: Shows how to calculate routes for public transportation vehicles such as subways, trains, or busses.
 - **Search**: Shows how to search POIs and add them to the map. Shows also geocoding and reverse geocoding.
-- **SearchHybrid**: Shows how to search POIs and add them to the map. Shows geocoding and reverse geocoding. Also shows how to search offline, when no internet connection is available. Exclusively available for the _Navigate Edition_.
+- **SearchHybrid**: Shows how to search for places including auto suggestions, for the address that belongs to certain geographic coordinates (reverse geocoding) and for the geographic coordinates that belong to an address (geocoding). It also shows how to search offline, when no internet connection is available. Exclusively available for the _Navigate Edition_.
 - **NavigationQuickStart**: Shows how to get started with turn-by-turn navigation. Exclusively available for the _Navigate Edition_.
 - **Navigation**: Gives an overview of how to implement many of the available turn-by-turn navigation and tracking features. Exclusively available for the _Navigate Edition_.
 - **NavigationCustom**: Shows how the guidance view can be customized. Exclusively available for the _Navigate Edition_.
+- **SpatialAudioNavigation**: Shows how to make use of spatial audio notifications for TTS voices during guidance. Exclusively available for the _Navigate Edition_.
 - **Positioning**: Shows how to integrate HERE Positioning. Exclusively available for the _Navigate Edition_.
+- **PositioningWithBackgroundUpdates**: Shows how to integrate HERE Positioning with background location updates on Android using a foreground service. Exclusively available for the _Navigate Edition_.
+- **HikingDiary**: Shows how to record GPX traces with HERE Positioning. Exclusively available for the _Navigate Edition_ (Android and iOS only).
 - **Traffic**: Shows how to search for real-time traffic and how to visualize it on the map.
 - **StandAloneEngine**: Shows how to use an engine without a map view.
 - **IndoorMap**: Shows how to integrate private venues. Exclusively available for the _Navigate Edition_.
-- **UnitTesting**: Shows how to mock HERE SDK classes when writing unit tests (Android only, the example app is available for the _Explore Edition_ and the _Navigate Edition_).
+- **UnitTesting**: Shows how to mock HERE SDK classes when writing unit tests (the example app is available for the _Explore Edition_ and the _Navigate Edition_).
 
 Most example apps contain a class named "XY-Example" where XY stands for the feature, which is in most cases equal to the name of the app. If you are looking for example code that shows how to use a certain HERE SDK feature, then please look for this class as it contains the most interesting parts. Note that the overall app architecture is kept as simple as possible to not shadow the parts in focus.
 

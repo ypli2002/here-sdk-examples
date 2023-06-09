@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,13 +33,15 @@ import com.here.sdk.core.GeoCoordinates;
 import com.here.sdk.core.LanguageCode;
 import com.here.sdk.core.Location;
 import com.here.sdk.core.UnitSystem;
+import com.here.sdk.core.engine.SDKNativeEngine;
 import com.here.sdk.core.errors.InstantiationErrorException;
 import com.here.sdk.location.LocationAccuracy;
 import com.here.sdk.mapview.MapView;
-import com.here.sdk.navigation.CameraTrackingMode;
+import com.here.sdk.navigation.AspectRatio;
 import com.here.sdk.navigation.DestinationReachedListener;
 import com.here.sdk.navigation.DimensionRestrictionType;
 import com.here.sdk.navigation.DistanceType;
+import com.here.sdk.navigation.DynamicCameraBehavior;
 import com.here.sdk.navigation.JunctionViewLaneAssistance;
 import com.here.sdk.navigation.JunctionViewLaneAssistanceListener;
 import com.here.sdk.navigation.Lane;
@@ -55,14 +57,23 @@ import com.here.sdk.navigation.MilestoneStatus;
 import com.here.sdk.navigation.MilestoneStatusListener;
 import com.here.sdk.navigation.NavigableLocation;
 import com.here.sdk.navigation.NavigableLocationListener;
+import com.here.sdk.navigation.RealisticView;
+import com.here.sdk.navigation.RealisticViewWarning;
+import com.here.sdk.navigation.RealisticViewWarningListener;
+import com.here.sdk.navigation.RealisticViewWarningOptions;
 import com.here.sdk.navigation.RoadAttributes;
 import com.here.sdk.navigation.RoadAttributesListener;
+import com.here.sdk.navigation.RoadSignVehicleType;
+import com.here.sdk.navigation.RoadSignWarning;
+import com.here.sdk.navigation.RoadSignWarningListener;
+import com.here.sdk.navigation.RoadSignWarningOptions;
 import com.here.sdk.navigation.RoadTextsListener;
 import com.here.sdk.navigation.RouteDeviation;
 import com.here.sdk.navigation.RouteDeviationListener;
 import com.here.sdk.navigation.RouteProgress;
 import com.here.sdk.navigation.RouteProgressListener;
 import com.here.sdk.navigation.SectionProgress;
+import com.here.sdk.navigation.SpeedBasedCameraBehavior;
 import com.here.sdk.navigation.SpeedLimit;
 import com.here.sdk.navigation.SpeedLimitListener;
 import com.here.sdk.navigation.SpeedLimitOffset;
@@ -73,6 +84,7 @@ import com.here.sdk.navigation.TruckRestrictionWarning;
 import com.here.sdk.navigation.TruckRestrictionsWarningListener;
 import com.here.sdk.navigation.VisualNavigator;
 import com.here.sdk.navigation.WeightRestrictionType;
+import com.here.sdk.prefetcher.RoutePrefetcher;
 import com.here.sdk.routing.Maneuver;
 import com.here.sdk.routing.ManeuverAction;
 import com.here.sdk.routing.RoadTexts;
@@ -84,6 +96,7 @@ import com.here.sdk.trafficawarenavigation.DynamicRoutingEngineOptions;
 import com.here.sdk.trafficawarenavigation.DynamicRoutingListener;
 import com.here.time.Duration;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -103,6 +116,7 @@ public class NavigationExample {
     private final VoiceAssistant voiceAssistant;
     private int previousManeuverIndex = -1;
     private MapMatchedLocation lastMapMatchedLocation;
+    private RoutePrefetcher routePrefetcher;
 
     private final TextView messageView;
 
@@ -114,6 +128,9 @@ public class NavigationExample {
         herePositioningProvider = new HEREPositioningProvider();
         // A class to receive simulated location events.
         herePositioningSimulator = new HEREPositioningSimulator();
+        // The RoutePrefetcher downloads map data in advance into the map cache.
+        // This is not mandatory, but can help to improve the guidance experience.
+        routePrefetcher = new RoutePrefetcher(SDKNativeEngine.getSharedInstance());
 
         try {
             // Without a route set, this starts tracking mode.
@@ -141,16 +158,26 @@ public class NavigationExample {
         herePositioningProvider.startLocating(visualNavigator, LocationAccuracy.NAVIGATION);
     }
 
+    private void prefetchMapData(GeoCoordinates currentGeoCoordinates) {
+        // Prefetches map data around the provided location with a radius of 2 km into the map cache.
+        // For the best experience, prefetchAroundLocation() should be called as early as possible.
+        routePrefetcher.prefetchAroundLocation(currentGeoCoordinates);
+        // Prefetches map data within a corridor along the route that is currently set to the provided Navigator instance.
+        // This happens continuously in discrete intervals.
+        // If no route is set, no data will be prefetched.
+        routePrefetcher.prefetchAroundRouteOnIntervals(visualNavigator);
+    }
+
     private void createDynamicRoutingEngine() {
         DynamicRoutingEngineOptions dynamicRoutingOptions = new DynamicRoutingEngineOptions();
         // We want an update for each poll iteration, so we specify 0 difference.
         dynamicRoutingOptions.minTimeDifference = Duration.ofSeconds(0);
         dynamicRoutingOptions.minTimeDifferencePercentage = 0.0;
-        dynamicRoutingOptions.pollIntervalInMinutes = 5;
+        dynamicRoutingOptions.pollInterval = Duration.ofMinutes(5);
 
         try {
             // With the dynamic routing engine you can poll the HERE backend services to search for routes with less traffic.
-            // THis can happen during guidance - or you can periodically update a route that is shown in a route planner.
+            // This can happen during guidance - or you can periodically update a route that is shown in a route planner.
             dynamicRoutingEngine = new DynamicRoutingEngine(dynamicRoutingOptions);
         } catch (InstantiationErrorException e) {
             throw new RuntimeException("Initialization of DynamicRoutingEngine failed: " + e.error.name());
@@ -189,6 +216,26 @@ public class NavigationExample {
                 String roadName = getRoadName(nextManeuver);
                 String logMessage = action.name() + " on " + roadName +
                         " in " + nextManeuverProgress.remainingDistanceInMeters + " meters.";
+
+                // Angle is null for some maneuvers like Depart, Arrive and Roundabout.
+                Double turnAngle = nextManeuver.getTurnAngleInDegrees();
+                if (turnAngle != null) {
+                    if (turnAngle > 10) {
+                        Log.d(TAG, "At the next maneuver: Make a right turn of " + turnAngle + " degrees.");
+                    } else if (turnAngle < -10) {
+                        Log.d(TAG, "At the next maneuver: Make a left turn of " + turnAngle + " degrees.");
+                    } else {
+                        Log.d(TAG, "At the next maneuver: Go straight.");
+                    }
+                }
+
+                // Angle is null when the roundabout maneuver is not an enter, exit or keep maneuver.
+                Double roundaboutAngle = nextManeuver.getRoundaboutAngleInDegrees();
+                if (roundaboutAngle != null) {
+                    // Note that the value is negative only for left-driving countries such as UK.
+                    Log.d(TAG, "At the next maneuver: Follow the roundabout for " +
+                            roundaboutAngle + " degrees to reach the exit.");
+                }
 
                 if (previousManeuverIndex != nextManeuverIndex) {
                     messageView.setText("New maneuver: " + logMessage);
@@ -319,6 +366,17 @@ public class NavigationExample {
 
                 int distanceInMeters = (int) currentGeoCoordinates.distanceTo(lastGeoCoordinatesOnRoute);
                 Log.d(TAG, "RouteDeviation in meters is " + distanceInMeters);
+
+                // Now, an application needs to decide if the user has deviated far enough and
+                // what should happen next: For example, you can notify the user or simply try to
+                // calculate a new route. When you calculate a new route, you can, for example,
+                // take the current location as new start and keep the destination - another
+                // option could be to calculate a new route back to the lastMapMatchedLocationOnRoute.
+                // At least, make sure to not calculate a new route every time you get a RouteDeviation
+                // event as the route calculation happens asynchronously and takes also some time to
+                // complete.
+                // The deviation event is sent any time an off-route location is detected: It may make
+                // sense to await around 3 events before deciding on possible actions.
             }
         });
 
@@ -425,7 +483,28 @@ public class NavigationExample {
             }
         });
 
-        // Notifies truck drivers on road restrictions ahead.
+        RoadSignWarningOptions roadSignWarningOptions = new RoadSignWarningOptions();
+        // Set a filter to get only shields relevant for TRUCKS and HEAVY_TRUCKS.
+        roadSignWarningOptions.vehicleTypesFilter = Arrays.asList(RoadSignVehicleType.TRUCKS, RoadSignVehicleType.HEAVY_TRUCKS);
+        visualNavigator.setRoadSignWarningOptions(roadSignWarningOptions);
+
+        // Notifies on road shields as they appear along the road.
+        visualNavigator.setRoadSignWarningListener(new RoadSignWarningListener() {
+            @Override
+            public void onRoadSignWarningUpdated(@NonNull RoadSignWarning roadSignWarning) {
+                Log.d(TAG, "Road sign distance (m): " + roadSignWarning.distanceToRoadSignInMeters);
+                Log.d(TAG, "Road sign type: " + roadSignWarning.type.name());
+
+                if (roadSignWarning.signValue != null) {
+                    // Optional text as it is printed on the local road sign.
+                    Log.d(TAG, "Road sign text: " + roadSignWarning.signValue.text);
+                }
+
+                // For more road sign attributes, please check the API Reference.
+            }
+        });
+
+        // Notifies truck drivers on road restrictions ahead. Called whenever there is a change.
         // For example, there can be a bridge ahead not high enough to pass a big truck
         // or there can be a road ahead where the weight of the truck is beyond it's permissible weight.
         // This event notifies on truck restrictions in general,
@@ -436,27 +515,30 @@ public class NavigationExample {
             public void onTruckRestrictionsWarningUpdated(@NonNull List<TruckRestrictionWarning> list) {
                 // The list is guaranteed to be non-empty.
                 for (TruckRestrictionWarning truckRestrictionWarning : list) {
-
                     if (truckRestrictionWarning.distanceType == DistanceType.AHEAD) {
                         Log.d(TAG, "TruckRestrictionWarning ahead in: "+ truckRestrictionWarning.distanceInMeters + " meters.");
+                    } else if (truckRestrictionWarning.distanceType == DistanceType.REACHED) {
+                        Log.d(TAG, "A restriction has been reached.");
                     } else if (truckRestrictionWarning.distanceType == DistanceType.PASSED) {
+                        // If not preceded by a "REACHED"-notification, this restriction was valid only for the passed location.
                         Log.d(TAG, "A restriction just passed.");
                     }
+
                     // One of the following restrictions applies ahead, if more restrictions apply at the same time,
                     // they are part of another TruckRestrictionWarning element contained in the list.
                     if (truckRestrictionWarning.weightRestriction != null) {
-                        // For now only one weight type (= truck) is exposed.
                         WeightRestrictionType type = truckRestrictionWarning.weightRestriction.type;
                         int value = truckRestrictionWarning.weightRestriction.valueInKilograms;
                         Log.d(TAG, "TruckRestriction for weight (kg): " + type.name() + ": " + value);
-                    }
-                    if (truckRestrictionWarning.dimensionRestriction != null) {
+                    } else if (truckRestrictionWarning.dimensionRestriction != null) {
                         // Can be either a length, width or height restriction of the truck. For example, a height
                         // restriction can apply for a tunnel. Other possible restrictions are delivered in
                         // separate TruckRestrictionWarning objects contained in the list, if any.
                         DimensionRestrictionType type = truckRestrictionWarning.dimensionRestriction.type;
                         int value = truckRestrictionWarning.dimensionRestriction.valueInCentimeters;
                         Log.d(TAG, "TruckRestriction for dimension: " + type.name() + ": " + value);
+                    } else {
+                        Log.d(TAG, "TruckRestriction: General restriction - no trucks allowed.");
                     }
                 }
             }
@@ -470,6 +552,54 @@ public class NavigationExample {
                 // See getRoadName() how to get the current road name from the provided RoadTexts.
             }
         });
+
+        RealisticViewWarningOptions realisticViewWarningOptions = new RealisticViewWarningOptions();
+        realisticViewWarningOptions.aspectRatio = AspectRatio.ASPECT_RATIO_3_X_4;
+        realisticViewWarningOptions.darkTheme = false;
+        visualNavigator.setRealisticViewWarningOptions(realisticViewWarningOptions);
+
+        // Notifies on signposts together with complex junction views.
+        // Signposts are shown as they appear along a road on a shield to indicate the upcoming directions and
+        // destinations, such as cities or road names.
+        // Junction views appear as a 3D visualization (as a static image) to help the driver to orientate.
+        //
+        // Optionally, you can use a feature-configuration to preload the assets as part of a Region.
+        //
+        // The event matches the notification for complex junctions, see JunctionViewLaneAssistance.
+        // Note that the SVG data for junction view is composed out of several 3D elements,
+        // a horizon and the actual junction geometry.
+        visualNavigator.setRealisticViewWarningListener(new RealisticViewWarningListener() {
+            @Override
+            public void onRealisticViewWarningUpdated(@NonNull RealisticViewWarning realisticViewWarning) {
+                double distance = realisticViewWarning.distanceToRealisticViewInMeters;
+                DistanceType distanceType = realisticViewWarning.distanceType;
+
+                // Note that DistanceType.REACHED is not used for Signposts and junction views
+                // as a junction is identified through a location instead of an area.
+                if (distanceType == DistanceType.AHEAD) {
+                    Log.d(TAG, "A RealisticView ahead in: "+ distance + " meters.");
+                } else if (distanceType == DistanceType.PASSED) {
+                    Log.d(TAG, "A RealisticView just passed.");
+                }
+
+                RealisticView realisticView = realisticViewWarning.realisticView;
+                if (realisticView == null) {
+                    Log.d(TAG, "A RealisticView just passed. No SVG data delivered.");
+                    return;
+                }
+
+                String signpostSvgImageContent = realisticView.signpostSvgImageContent;
+                String junctionViewSvgImageContent = realisticView.junctionViewSvgImageContent;
+                // The resolution-independent SVG data can now be used in an application to visualize the image.
+                // Use a SVG library of your choice to create an SVG image out of the SVG string.
+                // Both SVGs contain the same dimension and the signpostSvgImageContent should be shown on top of
+                // the junctionViewSvgImageContent.
+                // The images can be quite detailed, therefore it is recommended to show them on a secondary display
+                // in full size.
+                Log.d("signpostSvgImage", signpostSvgImageContent);
+                Log.d("junctionViewSvgImage", junctionViewSvgImageContent);
+            }
+        });
     }
 
     private String getRoadName(Maneuver maneuver) {
@@ -477,9 +607,9 @@ public class NavigationExample {
         RoadTexts nextRoadTexts = maneuver.getNextRoadTexts();
 
         String currentRoadName = currentRoadTexts.names.getDefaultValue();
-        String currentRoadNumber = currentRoadTexts.numbers.getDefaultValue();
+        String currentRoadNumber = currentRoadTexts.numbersWithDirection.getDefaultValue();
         String nextRoadName = nextRoadTexts.names.getDefaultValue();
-        String nextRoadNumber = nextRoadTexts.numbers.getDefaultValue();
+        String nextRoadNumber = nextRoadTexts.numbersWithDirection.getDefaultValue();
 
         String roadName = nextRoadName == null ? nextRoadNumber : nextRoadName;
 
@@ -530,7 +660,6 @@ public class NavigationExample {
     }
 
     private Double getCurrentSpeedLimit(SpeedLimit speedLimit) {
-
         // Note that all values can be null if no data is available.
 
         // The regular speed limit if available. In case of unbounded speed limit, the value is zero.
@@ -562,11 +691,17 @@ public class NavigationExample {
     }
 
     public void startNavigation(Route route, boolean isSimulated) {
+        GeoCoordinates startGeoCoordinates = route.getGeometry().vertices.get(0);
+        prefetchMapData(startGeoCoordinates);
+
         setupSpeedWarnings();
         setupVoiceGuidance();
 
         // Switches to navigation mode when no route was set before, otherwise navigation mode is kept.
         visualNavigator.setRoute(route);
+
+        // Enable auto-zoom during guidance.
+        visualNavigator.setCameraBehavior(new DynamicCameraBehavior());
 
         if (isSimulated) {
             enableRoutePlayback(route);
@@ -593,8 +728,8 @@ public class NavigationExample {
                             " distanceDifferenceInMeters: " + distanceDifferenceInMeters;
                     messageView.setText("DynamicRoutingEngine update: " + logMessage);
 
-                    // An implementation can decide to switch to the new route:
-                    // visualNavigator.setRoute(newRoute);
+                    // An implementation needs to decide when to switch to the new route based
+                    // on above criteria.
                 }
 
                 @Override
@@ -612,10 +747,13 @@ public class NavigationExample {
         // Without a route the navigator will only notify on the current map-matched location
         // including info such as speed and current street name.
         visualNavigator.setRoute(null);
+        // SpeedBasedCameraBehavior is recommended for tracking mode.
+        visualNavigator.setCameraBehavior(new SpeedBasedCameraBehavior());
         enableDevicePositioning();
         messageView.setText("Tracking device's location.");
 
         dynamicRoutingEngine.stop();
+        routePrefetcher.stopPrefetchAroundRoute();
     }
 
     // Provides simulated location updates based on the given route.
@@ -631,11 +769,11 @@ public class NavigationExample {
     }
 
     public void startCameraTracking() {
-        visualNavigator.setCameraMode(CameraTrackingMode.ENABLED);
+        visualNavigator.setCameraBehavior(new DynamicCameraBehavior());
     }
 
     public void stopCameraTracking() {
-        visualNavigator.setCameraMode(CameraTrackingMode.DISABLED);
+        visualNavigator.setCameraBehavior(null);
     }
 
     @Nullable
@@ -688,5 +826,11 @@ public class NavigationExample {
 
     public void stopLocating() {
         herePositioningProvider.stopLocating();
+    }
+
+    public void stopRendering() {
+      // It is recommended to stop rendering before leaving an activity.
+      // This also removes the current location marker.
+      visualNavigator.stopRendering();
     }
 }

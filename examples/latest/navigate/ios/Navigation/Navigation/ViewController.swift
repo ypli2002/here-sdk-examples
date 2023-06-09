@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ final class ViewController: UIViewController {
         self.isMapSceneLoaded = true
 
         // Enable traffic flows by default.
-        mapView.mapScene.setLayerVisibility(layerName: MapScene.Layers.trafficFlow, visibility: VisibilityState.visible)
+        mapView.mapScene.enableFeatures([MapFeatures.trafficFlow : MapFeatureModes.trafficFlowWithFreeFlow])
     }
 
     @IBAction func onAddRouteSimulatedLocationButtonClicked(_ sender: Any) {

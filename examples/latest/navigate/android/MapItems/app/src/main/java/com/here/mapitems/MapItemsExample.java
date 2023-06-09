@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,15 +29,14 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 
 import com.here.sdk.core.Anchor2D;
+import com.here.sdk.core.Color;
 import com.here.sdk.core.GeoCoordinates;
-import com.here.sdk.core.GeoOrientation;
 import com.here.sdk.core.GeoOrientationUpdate;
 import com.here.sdk.core.Location;
 import com.here.sdk.core.Metadata;
 import com.here.sdk.core.Point2D;
 import com.here.sdk.gestures.TapListener;
 import com.here.sdk.mapview.LocationIndicator;
-import com.here.sdk.mapview.MapCamera;
 import com.here.sdk.mapview.MapImage;
 import com.here.sdk.mapview.MapImageFactory;
 import com.here.sdk.mapview.MapMarker;
@@ -47,6 +46,8 @@ import com.here.sdk.mapview.MapMarkerCluster;
 import com.here.sdk.mapview.MapView;
 import com.here.sdk.mapview.MapViewBase;
 import com.here.sdk.mapview.PickMapItemsResult;
+import com.here.sdk.mapview.RenderSize;
+import com.here.time.Duration;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -101,20 +102,35 @@ public class MapItemsExample {
     }
 
     public void showMapMarkerCluster() {
-        MapImage clusterMapImage = MapImageFactory.fromResource(context.getResources(), R.drawable.blue_square);
-        MapMarkerCluster mapMarkerCluster = new MapMarkerCluster(new MapMarkerCluster.ImageStyle(clusterMapImage));
+        MapImage clusterMapImage = MapImageFactory.fromResource(context.getResources(), R.drawable.green_square);
+
+        // Defines a text that indicates how many markers are included in the cluster.
+        MapMarkerCluster.CounterStyle counterStyle = new MapMarkerCluster.CounterStyle();
+        counterStyle.textColor = new Color(0, 0, 0, 1); // Black
+        counterStyle.fontSize = 40;
+        counterStyle.maxCountNumber = 9;
+        counterStyle.aboveMaxText = "+9";
+
+        MapMarkerCluster mapMarkerCluster = new MapMarkerCluster(
+                new MapMarkerCluster.ImageStyle(clusterMapImage), counterStyle);
         mapView.getMapScene().addMapMarkerCluster(mapMarkerCluster);
         mapMarkerClusterList.add(mapMarkerCluster);
 
         for (int i = 0; i < 10; i++) {
-            mapMarkerCluster.addMapMarker(createRandomMapMarkerInViewport());
+            mapMarkerCluster.addMapMarker(createRandomMapMarkerInViewport("" + i));
         }
     }
 
-    private MapMarker createRandomMapMarkerInViewport() {
+    private MapMarker createRandomMapMarkerInViewport(String metaDataText) {
         GeoCoordinates geoCoordinates = createRandomGeoCoordinatesAroundMapCenter();
         MapImage mapImage = MapImageFactory.fromResource(context.getResources(), R.drawable.green_square);
+
         MapMarker mapMarker = new MapMarker(geoCoordinates, mapImage);
+
+        Metadata metadata = new Metadata();
+        metadata.setString("key_cluster", metaDataText);
+        mapMarker.setMetadata(metadata);
+
         return mapMarker;
     }
 
@@ -136,14 +152,14 @@ public class MapItemsExample {
         addLocationIndicator(geoCoordinates, LocationIndicator.IndicatorStyle.NAVIGATION);
     }
 
-    public void showFlatMarker() {
+    public void show2DTexture() {
         // Tilt the map for a better 3D effect.
         tiltMap();
 
         GeoCoordinates geoCoordinates = createRandomGeoCoordinatesAroundMapCenter();
 
         // Adds a flat POI marker that rotates and tilts together with the map.
-        addFlatMarker3D(geoCoordinates);
+        add2DTexture(geoCoordinates);
 
         // A centered 2D map marker to indicate the exact location.
         // Note that 3D map markers are always drawn on top of 2D map markers.
@@ -159,6 +175,19 @@ public class MapItemsExample {
         // Adds a textured 3D model.
         // It's origin is centered on the location.
         addMapMarker3D(geoCoordinates);
+    }
+
+    public void showFlatMapMarker() {
+        // Tilt the map for a better 3D effect.
+        tiltMap();
+
+        GeoCoordinates geoCoordinates = createRandomGeoCoordinatesAroundMapCenter();
+
+        // It's origin is centered on the location.
+        addFlatMarker(geoCoordinates);
+
+        // A centered 2D map marker to indicate the exact location.
+        addCircleMapMarker(geoCoordinates);
     }
 
     public void clearMap() {
@@ -209,6 +238,9 @@ public class MapItemsExample {
         MapImage mapImage = MapImageFactory.fromResource(context.getResources(), R.drawable.circle);
         MapMarker mapMarker = new MapMarker(geoCoordinates, mapImage);
 
+        // Optionally, enable a fade in-out animation.
+        mapMarker.setFadeDuration(Duration.ofSeconds(3));
+
         mapView.getMapScene().addMapMarker(mapMarker);
         mapMarkerList.add(mapMarker);
     }
@@ -220,11 +252,9 @@ public class MapItemsExample {
 
         // A LocationIndicator is intended to mark the user's current location,
         // including a bearing direction.
-        Location location = new Location.Builder()
-            .setCoordinates(geoCoordinates)
-            .setTimestamp(new Date())
-            .setBearingInDegrees(getRandom(0, 360))
-            .build();
+        Location location = new Location(geoCoordinates);
+        location.time = new Date();
+        location.bearingInDegrees = getRandom(0, 360);
 
         locationIndicator.updateLocation(location);
 
@@ -243,7 +273,7 @@ public class MapItemsExample {
         }
     }
 
-    private void addFlatMarker3D(GeoCoordinates geoCoordinates) {
+    private void add2DTexture(GeoCoordinates geoCoordinates) {
         // Place the files in the "assets" directory.
         // Full path example: app/src/main/assets/plane.obj
         // Adjust file name and path as appropriate for your project.
@@ -264,6 +294,20 @@ public class MapItemsExample {
         mapMarker3DList.add(mapMarker3D);
     }
 
+    private void addFlatMarker(GeoCoordinates geoCoordinates) {
+        MapImage mapImage = MapImageFactory.fromResource(context.getResources(), R.drawable.poi);
+
+        // The default scale factor of the map marker is 1.0. For a scale of 2, the map marker becomes 2x larger.
+        // For a scale of 0.5, the map marker shrinks to half of its original size.
+        double scaleFactor = 0.5;
+
+        // With DENSITY_INDEPENDENT_PIXELS the map marker will have a constant size on the screen regardless if the map is zoomed in or out.
+        MapMarker3D mapMarker3D = new MapMarker3D(geoCoordinates, mapImage, scaleFactor, RenderSize.Unit.DENSITY_INDEPENDENT_PIXELS);
+
+        mapView.getMapScene().addMapMarker3d(mapMarker3D);
+        mapMarker3DList.add(mapMarker3D);
+    }
+
     private void addMapMarker3D(GeoCoordinates geoCoordinates) {
         // Place the files in the "assets" directory.
         // Full path example: app/src/main/assets/obstacle.obj
@@ -273,9 +317,20 @@ public class MapItemsExample {
         checkIfFileExistsInAssetsFolder(geometryFile);
         checkIfFileExistsInAssetsFolder(textureFile);
 
+        // Without depth check, 3D models are rendered on top of everything. With depth check enabled,
+        // it may be hidden by buildings. In addition:
+        // If a 3D object has its center at the origin of its internal coordinate system, 
+        // then parts of it may be rendered below the ground surface (altitude < 0).
+        // Note that the HERE SDK map surface is flat, following a Mercator or Globe projection. 
+        // Therefore, a 3D object becomes visible when the altitude of its location is 0 or higher.
+        // By default, without setting a scale factor, 1 unit in 3D coordinate space equals 1 meter.
+        double altitude = 18.0;
+        GeoCoordinates geoCoordinatesWithAltitude = new GeoCoordinates(geoCoordinates.latitude, geoCoordinates.longitude, altitude);
+
         MapMarker3DModel mapMarker3DModel = new MapMarker3DModel(geometryFile, textureFile);
-        MapMarker3D mapMarker3D = new MapMarker3D(geoCoordinates, mapMarker3DModel);
+        MapMarker3D mapMarker3D = new MapMarker3D(geoCoordinatesWithAltitude, mapMarker3DModel);
         mapMarker3D.setScale(6);
+        mapMarker3D.setDepthCheckEnabled(true);
 
         mapView.getMapScene().addMapMarker3d(mapMarker3D);
         mapMarker3DList.add(mapMarker3D);
@@ -365,12 +420,30 @@ public class MapItemsExample {
         }
         if (clusterSize == 1) {
             showDialog("Map marker picked",
-                    "This MapMarker belongs to a cluster.");
+                    "This MapMarker belongs to a cluster. Metadata: " + getClusterMetadata(topmostGrouping.markers.get(0)));
         } else {
+            String metadata = "";
+            for (MapMarker mapMarker: topmostGrouping.markers) {
+                metadata += getClusterMetadata(mapMarker);
+                metadata += " ";
+            }
             showDialog("Map marker cluster picked",
                     "Number of contained markers in this cluster: " + clusterSize + ". " +
+                            "Contained Metadata: " + metadata + ". " +
                             "Total number of markers in this MapMarkerCluster: " + topmostGrouping.parent.getMarkers().size());
         }
+    }
+
+    private String getClusterMetadata(MapMarker mapMarker) {
+        Metadata metadata = mapMarker.getMetadata();
+        String message = "No metadata.";
+        if (metadata != null) {
+            String string = metadata.getString("key_cluster");
+            if (string != null) {
+                message = string;
+            }
+        }
+        return message;
     }
 
     private void tiltMap() {

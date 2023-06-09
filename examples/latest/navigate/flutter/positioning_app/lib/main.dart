@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 HERE Europe B.V.
+ * Copyright (C) 2020-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -20,11 +20,15 @@
 import 'package:flutter/material.dart';
 import 'package:here_sdk/consent.dart';
 import 'package:here_sdk/core.dart';
+import 'package:here_sdk/core.engine.dart';
+import 'package:here_sdk/core.errors.dart';
 
 import 'PositioningExample.dart';
 
 void main() {
-  SdkContext.init(IsolateOrigin.main);
+  // Usually, you need to initialize the HERE SDK only once during the lifetime of an application.
+  _initializeHERESDK();
+
   runApp(
     MaterialApp(
       localizationsDelegates: HereSdkConsentLocalizations.localizationsDelegates,
@@ -32,6 +36,22 @@ void main() {
       home: MyApp(),
     ),
   );
+}
+
+void _initializeHERESDK() async {
+  // Needs to be called before accessing SDKOptions to load necessary libraries.
+  SdkContext.init(IsolateOrigin.main);
+
+  // Set your credentials for the HERE SDK.
+  String accessKeyId = "YOUR_ACCESS_KEY_ID";
+  String accessKeySecret = "YOUR_ACCESS_KEY_SECRET";
+  SDKOptions sdkOptions = SDKOptions.withAccessKeySecret(accessKeyId, accessKeySecret);
+
+  try {
+    await SDKNativeEngine.makeSharedInstance(sdkOptions);
+  } on InstantiationException {
+    throw Exception("Failed to initialize the HERE SDK.");
+  }
 }
 
 class MyApp extends StatefulWidget {

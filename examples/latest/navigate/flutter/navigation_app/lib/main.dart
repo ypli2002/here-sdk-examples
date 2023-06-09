@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -23,13 +23,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:here_sdk/consent.dart';
 import 'package:here_sdk/core.dart';
+import 'package:here_sdk/core.engine.dart';
+import 'package:here_sdk/core.errors.dart';
 import 'package:here_sdk/mapview.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'AppLogic.dart';
 
 void main() {
-  SdkContext.init(IsolateOrigin.main);
+  // Usually, you need to initialize the HERE SDK only once during the lifetime of an application.
+  _initializeHERESDK();
+
   runApp(
     MaterialApp(
       // Enable localizations for the ConsentEngine's dialog widget.
@@ -38,6 +42,22 @@ void main() {
       home: MyApp(),
     ),
   );
+}
+
+void _initializeHERESDK() async {
+  // Needs to be called before accessing SDKOptions to load necessary libraries.
+  SdkContext.init(IsolateOrigin.main);
+
+  // Set your credentials for the HERE SDK.
+  String accessKeyId = "YOUR_ACCESS_KEY_ID";
+  String accessKeySecret = "YOUR_ACCESS_KEY_SECRET";
+  SDKOptions sdkOptions = SDKOptions.withAccessKeySecret(accessKeyId, accessKeySecret);
+
+  try {
+    await SDKNativeEngine.makeSharedInstance(sdkOptions);
+  } on InstantiationException {
+    throw Exception("Failed to initialize the HERE SDK.");
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -55,51 +75,68 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   // When using HERE Positioning in your app, it is required to request and to show the user's consent decision.
   // In addition, users must be able to change their consent decision at any time.
   // Note that this is only needed when running on Android devices.
-  final ConsentEngine _consentEngine = ConsentEngine();
+  ConsentEngine? _consentEngine;
   String _consentState = "Pending ...";
   String _messageState = "";
 
+  Future<bool> _handleBackPress() async {
+    // Handle the back press.
+    _appLogic?.detach();
+
+    // Return true to allow the back press.
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text("HERE SDK - Navigation Example"),
-      ),
-      body: Stack(
-        children: [
-          HereMap(onMapCreated: _onMapCreated),
-          Column(
-            mainAxisAlignment: MainAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  button("Start Simulation", _startNavigationSimulationButtonClicked),
-                  button(_trackingState, toggleTrackingButtonClicked),
-                  button("Stop", _stopNavigationButtonClicked),
-                ],
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  button("Start with HERE Positioning", _startNavigationButtonClicked),
-                ],
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  multiLineButton(_consentState, _requestConsent),
-                ],
-              ),
-              messageStateWidget(_messageState),
-            ],
-          ),
-        ],
+    return WillPopScope(
+      onWillPop: _handleBackPress,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text("HERE SDK - Navigation Example"),
+        ),
+        body: Stack(
+          children: [
+            HereMap(onMapCreated: _onMapCreated),
+            Column(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    button("Start Simulation", _startNavigationSimulationButtonClicked),
+                    button(_trackingState, toggleTrackingButtonClicked),
+                    button("Stop", _stopNavigationButtonClicked),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    button("Start with HERE Positioning", _startNavigationButtonClicked),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    multiLineButton(_consentState, _requestConsent),
+                  ],
+                ),
+                messageStateWidget(_messageState),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
   void _onMapCreated(HereMapController hereMapController) {
+    try {
+      _consentEngine = ConsentEngine();
+    } on InstantiationException {
+      throw ("Initialization of ConsentEngine failed.");
+    }
+
     hereMapController.mapScene.loadSceneForMapScheme(MapScheme.normalDay, (MapError? error) async {
       _updateMessageState("Loading MapView ...");
       if (error == null) {
@@ -113,7 +150,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         }
 
         // 2. Once permissions are granted, we request the user's consent decision which is required for HERE Positioning.
-        if (_consentEngine.userConsentState == ConsentUserReply.notHandled) {
+        if (_consentEngine?.userConsentState == ConsentUserReply.notHandled) {
           await _requestConsent();
         } else {
           _updateConsentState();
@@ -153,7 +190,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   Future<void> _requestConsent() async {
     if (!Platform.isIOS) {
       // This shows a localized widget that asks the user if data can be collected or not.
-      await _consentEngine.requestUserConsent(context);
+      await _consentEngine?.requestUserConsent(context);
     }
 
     _updateConsentState();
@@ -164,7 +201,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     String stateMessage;
     if (Platform.isIOS) {
       stateMessage = "Info: On iOS no consent is required as on iOS no data is collected.";
-    } else if (_consentEngine.userConsentState == ConsentUserReply.granted) {
+    } else if (_consentEngine?.userConsentState == ConsentUserReply.granted) {
       stateMessage = "Positioning consent: You have granted consent to the data collection.";
     } else {
       stateMessage = "Positioning consent: You have denied consent to the data collection.";
@@ -218,6 +255,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance!.removeObserver(this);
+
+    // Free HERE SDK resources before the application shuts down.
+    SDKNativeEngine.sharedInstance?.dispose();
+    SdkContext.release();
+
     super.dispose();
   }
 
@@ -254,13 +296,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ),
         onPressed: callbackFunction,
         child: Container(
-            width: MediaQuery.of(context).size.width  * 0.8,
-            padding: EdgeInsets.all(2.0),
-            child: Text(
-              buttonLabel,
-              style: TextStyle(fontSize: 15),
-              textAlign: TextAlign.center,
-            ),
+          width: MediaQuery.of(context).size.width * 0.8,
+          padding: EdgeInsets.all(2.0),
+          child: Text(
+            buttonLabel,
+            style: TextStyle(fontSize: 15),
+            textAlign: TextAlign.center,
+          ),
         ),
       ),
     );
@@ -273,7 +315,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         padding: EdgeInsets.all(8.0),
         child: Text(
           messageState,
-          style: TextStyle(fontSize: 15, color: Colors.white,),
+          style: TextStyle(
+            fontSize: 15,
+            color: Colors.white,
+          ),
         ),
       ),
       color: Colors.blue,

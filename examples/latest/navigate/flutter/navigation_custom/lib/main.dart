@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,15 +21,35 @@ import 'package:flutter/material.dart';
 import 'package:here_sdk/animation.dart';
 import 'package:here_sdk/core.dart' as HERE;
 import 'package:here_sdk/core.dart';
+import 'package:here_sdk/core.engine.dart';
 import 'package:here_sdk/core.errors.dart';
 import 'package:here_sdk/mapview.dart';
 import 'package:here_sdk/navigation.dart';
 import 'package:here_sdk/routing.dart' as HERE;
+import 'package:here_sdk/routing.dart';
 
 void main() {
-  HERE.SdkContext.init(HERE.IsolateOrigin.main);
+  // Usually, you need to initialize the HERE SDK only once during the lifetime of an application.
+  _initializeHERESDK();
+
   // Ensure that all widgets, including MyApp, have a MaterialLocalizations object available.
   runApp(MaterialApp(home: MyApp()));
+}
+
+void _initializeHERESDK() async {
+  // Needs to be called before accessing SDKOptions to load necessary libraries.
+  SdkContext.init(IsolateOrigin.main);
+
+  // Set your credentials for the HERE SDK.
+  String accessKeyId = "YOUR_ACCESS_KEY_ID";
+  String accessKeySecret = "YOUR_ACCESS_KEY_SECRET";
+  SDKOptions sdkOptions = SDKOptions.withAccessKeySecret(accessKeyId, accessKeySecret);
+
+  try {
+    await SDKNativeEngine.makeSharedInstance(sdkOptions);
+  } on InstantiationException {
+    throw Exception("Failed to initialize the HERE SDK.");
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -54,26 +74,37 @@ class _MyAppState extends State<MyApp> implements HERE.LocationListener, Animati
   bool _isDefaultLocationIndicator = true;
   HERE.Route? myRoute;
 
+  Future<bool> _handleBackPress() async {
+    // Handle the back press.
+    _visualNavigator?.stopRendering();
+    _locationSimulator?.stop();
+
+    // Return true to allow the back press.
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Custom Navigation'),
-      ),
-      body: Stack(
-        children: [
-          HereMap(onMapCreated: _onMapCreated),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+    return WillPopScope(
+        onWillPop: _handleBackPress,
+        child: Scaffold(
+          appBar: AppBar(
+            title: Text('Custom Navigation'),
+          ),
+          body: Stack(
             children: [
-              button('Start', _startButtonClicked),
-              button('Stop', _stopButtonClicked),
-              button('Toggle', _toggleButtonClicked),
+              HereMap(onMapCreated: _onMapCreated),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  button('Start', _startButtonClicked),
+                  button('Stop', _stopButtonClicked),
+                  button('Toggle', _toggleButtonClicked),
+                ],
+              ),
             ],
           ),
-        ],
-      ),
-    );
+        ));
   }
 
   void _onMapCreated(HereMapController hereMapController) {
@@ -83,7 +114,8 @@ class _MyAppState extends State<MyApp> implements HERE.LocationListener, Animati
         print('Map scene not loaded. MapError: ${error.toString()}');
         return;
       }
-      _hereMapController!.camera.lookAtPointWithDistance(_routeStartGeoCoordinates, _distanceInMeters);
+      MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, _distanceInMeters);
+      _hereMapController!.camera.lookAtPointWithMeasure(_routeStartGeoCoordinates, mapMeasureZoom);
       _startAppLogic();
     });
   }
@@ -105,10 +137,10 @@ class _MyAppState extends State<MyApp> implements HERE.LocationListener, Animati
     }
 
     // Enable a few map layers that might be useful to see for drivers.
-    _hereMapController!.mapScene.setLayerVisibility(MapSceneLayers.trafficFlow, VisibilityState.visible);
-    _hereMapController!.mapScene.setLayerVisibility(MapSceneLayers.trafficIncidents, VisibilityState.visible);
-    _hereMapController!.mapScene.setLayerVisibility(MapSceneLayers.safetyCameras, VisibilityState.visible);
-    _hereMapController!.mapScene.setLayerVisibility(MapSceneLayers.vehicleRestrictions, VisibilityState.visible);
+    _hereMapController!.mapScene.enableFeatures({MapFeatures.trafficFlow: MapFeatureModes.trafficFlowWithFreeFlow});
+    _hereMapController!.mapScene.enableFeatures({MapFeatures.trafficIncidents: MapFeatureModes.defaultMode});
+    _hereMapController!.mapScene.enableFeatures({MapFeatures.safetyCameras: MapFeatureModes.defaultMode});
+    _hereMapController!.mapScene.enableFeatures({MapFeatures.vehicleRestrictions: MapFeatureModes.defaultMode});
 
     _defaultLocationIndicator = LocationIndicator();
     _customLocationIndicator = _createCustomLocationIndicator();
@@ -144,10 +176,14 @@ class _MyAppState extends State<MyApp> implements HERE.LocationListener, Animati
 
   // Calculate a fixed route for testing and start guidance simulation along the route.
   void _startButtonClicked() {
+    if (_isVisualNavigatorRenderingStarted) {
+      return;
+    }
+
     HERE.Waypoint startWaypoint = HERE.Waypoint(_routeStartGeoCoordinates);
     HERE.Waypoint destinationWaypoint = HERE.Waypoint(HERE.GeoCoordinates(52.530905, 13.385007));
 
-    _routingEngine!.calculateCarRoute([startWaypoint, destinationWaypoint], HERE.CarOptions.withDefaults(),
+    _routingEngine!.calculateCarRoute([startWaypoint, destinationWaypoint], HERE.CarOptions(),
         (HERE.RoutingError? routingError, List<HERE.Route>? routeList) async {
       if (routingError == null) {
         // When error is null, it is guaranteed that the routeList is not empty.
@@ -165,7 +201,7 @@ class _MyAppState extends State<MyApp> implements HERE.LocationListener, Animati
     _stopGuidance();
   }
 
-  // Toogle between the default LocationIndicator and custom LocationIndicator.
+  // Toggle between the default LocationIndicator and custom LocationIndicator.
   // The default LocationIndicator uses a 3D asset that is part of the HERE SDK.
   // The custom LocationIndicator uses different 3D assets, see asset folder.
   void _toggleButtonClicked() {
@@ -240,34 +276,49 @@ class _MyAppState extends State<MyApp> implements HERE.LocationListener, Animati
     }
   }
 
+  // Animate to custom guidance perspective, centered on start location of route.
   void _animateToRouteStart(HERE.Route route) {
-    // Animate to custom guidance perspective, centered on start location of route.
+    // The first coordinate marks the start location of the route.
+    var routeStart = route.geometry.vertices.first;
+    var geoCoordinatesUpdate = GeoCoordinatesUpdate.fromGeoCoordinates(routeStart);
+
     double? bearingInDegrees;
     double tiltInDegrees = 70;
-    _hereMapController!.camera.flyToWithOptionsAndGeoOrientationAndDistanceAndListener(
-        // The first coordinate marks the start location of the route.
-        route.geometry.vertices.first,
-        GeoOrientationUpdate(bearingInDegrees, tiltInDegrees),
-        50,
-        MapCameraFlyToOptions.withDefaults(),
-        this);
+    var orientationUpdate = GeoOrientationUpdate(bearingInDegrees, tiltInDegrees);
+
+    double distanceToEarthInMeters = 50;
+    var mapMeasure = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
+
+    double bowFactor = 1;
+    MapCameraAnimation animation = MapCameraAnimationFactory.flyToWithOrientationAndZoom(
+        geoCoordinatesUpdate, orientationUpdate, mapMeasure, bowFactor, Duration(seconds: 3));
+    _hereMapController!.camera.startAnimationWithListener(animation, this);
   }
 
   void _animateToDefaultMapPerspective() {
+    var targetCoordinates = _hereMapController!.camera.state.targetCoordinates;
+    var geoCoordinatesUpdate = GeoCoordinatesUpdate.fromGeoCoordinates(targetCoordinates);
+
     // By setting null we keep the current bearing rotation of the map.
     double? bearingInDegrees;
     double tiltInDegrees = 0;
-    _hereMapController!.camera.flyToWithOptionsAndGeoOrientationAndDistance(
-        _hereMapController!.camera.state.targetCoordinates,
-        GeoOrientationUpdate(bearingInDegrees, tiltInDegrees),
-        _distanceInMeters,
-        MapCameraFlyToOptions.withDefaults());
+    var orientationUpdate = GeoOrientationUpdate(bearingInDegrees, tiltInDegrees);
+
+    var mapMeasure = MapMeasure(MapMeasureKind.distance, _distanceInMeters);
+
+    double bowFactor = 1;
+    MapCameraAnimation animation = MapCameraAnimationFactory.flyToWithOrientationAndZoom(
+        geoCoordinatesUpdate, orientationUpdate, mapMeasure, bowFactor, Duration(seconds: 3));
+    _hereMapController!.camera.startAnimation(animation);
   }
 
   _startGuidance(HERE.Route route) {
     if (_isVisualNavigatorRenderingStarted) {
       return;
     }
+
+    // Set the route and maneuver arrow color.
+    _customizeVisualNavigatorColors();
 
     // Set custom guidance perspective.
     _customizeGuidanceView();
@@ -300,15 +351,36 @@ class _MyAppState extends State<MyApp> implements HERE.LocationListener, Animati
     _animateToDefaultMapPerspective();
   }
 
+  void _customizeVisualNavigatorColors() {
+    Color routeAheadColor = Colors.blue;
+    Color routeBehindColor = Colors.red;
+    Color routeAheadOutlineColor = Colors.yellow;
+    Color routeBehindOutlineColor = Colors.grey;
+    Color maneuverArrowColor = Colors.green;
+
+    VisualNavigatorColors visualNavigatorColors = VisualNavigatorColors.dayColors();
+    RouteProgressColors routeProgressColors =
+        new RouteProgressColors(routeAheadColor, routeBehindColor, routeAheadOutlineColor, routeBehindOutlineColor);
+
+    // Sets the color used to draw maneuver arrows.
+    visualNavigatorColors.maneuverArrowColor = maneuverArrowColor;
+    // Sets route color for a single transport mode. Other modes are kept using defaults.
+    visualNavigatorColors.setRouteProgressColors(SectionTransportMode.car, routeProgressColors);
+    // Sets the adjusted colors for route progress and maneuver arrows based on the day color scheme.
+    _visualNavigator?.colors = visualNavigatorColors;
+  }
+
   void _customizeGuidanceView() {
-    // The CameraSettings can be updated during guidance at any time as often as desired.
-    _visualNavigator?.cameraSettings = CameraSettings.withDefaults();
+    FixedCameraBehavior cameraBehavior = FixedCameraBehavior();
     // Set custom zoom level and tilt.
-    _visualNavigator?.cameraSettings.cameraDistanceInMeters = 50; // Defaults to 150.
-    _visualNavigator?.cameraSettings.cameraTiltInDegrees = 70; // Defaults to 50.
+    cameraBehavior.cameraDistanceInMeters = 50; // Defaults to 150.
+    cameraBehavior.cameraTiltInDegrees = 70; // Defaults to 50.
     // Disable North-Up mode by setting null. Enable North-up mode by setting 0.
     // By default, North-Up mode is disabled.
-    _visualNavigator?.cameraSettings.cameraBearingInDegrees = null;
+    cameraBehavior.cameraBearingInDegrees = null;
+
+    // The CameraBehavior can be updated during guidance at any time as often as desired.
+    _visualNavigator?.cameraBehavior = cameraBehavior;
   }
 
   // Implement HERE.LocationListener.
@@ -325,13 +397,21 @@ class _MyAppState extends State<MyApp> implements HERE.LocationListener, Animati
 
     try {
       // Provides fake GPS signals based on the route geometry.
-      _locationSimulator = LocationSimulator.withRoute(route, LocationSimulatorOptions.withDefaults());
+      _locationSimulator = LocationSimulator.withRoute(route, LocationSimulatorOptions());
     } on InstantiationException {
       throw Exception("Initialization of LocationSimulator failed.");
     }
 
     _locationSimulator!.listener = this;
     _locationSimulator!.start();
+  }
+
+  @override
+  void dispose() {
+    // Free HERE SDK resources before the application shuts down.
+    SDKNativeEngine.sharedInstance?.dispose();
+    SdkContext.release();
+    super.dispose();
   }
 
   // A helper method to add a button on top of the HERE map.

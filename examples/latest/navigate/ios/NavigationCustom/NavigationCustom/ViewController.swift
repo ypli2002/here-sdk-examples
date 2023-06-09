@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,8 +52,9 @@ class ViewController: UIViewController, AnimationDelegate, LocationDelegate {
 
         // Configure the map.
         let camera = mapView.camera
+        let distanceToEarthInMeters: Double = 1000
         camera.lookAt(point: routeStartGeoCoordinates,
-                      distanceInMeters: distanceInMeters)
+                      zoom: MapMeasure(kind: .distance, value: distanceToEarthInMeters))
 
         startAppLogic()
     }
@@ -73,11 +74,11 @@ class ViewController: UIViewController, AnimationDelegate, LocationDelegate {
         }
 
         // Enable a few map layers that might be useful to see for drivers.
-        mapView.mapScene.setLayerVisibility(layerName: MapScene.Layers.trafficFlow, visibility: VisibilityState.visible)
-        mapView.mapScene.setLayerVisibility(layerName: MapScene.Layers.trafficIncidents, visibility: VisibilityState.visible)
-        mapView.mapScene.setLayerVisibility(layerName: MapScene.Layers.safetyCameras, visibility: VisibilityState.visible)
-        mapView.mapScene.setLayerVisibility(layerName: MapScene.Layers.vehicleRestrictions, visibility: VisibilityState.visible)
-
+        mapView.mapScene.enableFeatures([MapFeatures.trafficFlow : MapFeatureModes.trafficFlowWithFreeFlow])
+        mapView.mapScene.enableFeatures([MapFeatures.trafficIncidents : MapFeatureModes.defaultMode])
+        mapView.mapScene.enableFeatures([MapFeatures.safetyCameras : MapFeatureModes.defaultMode])
+        mapView.mapScene.enableFeatures([MapFeatures.vehicleRestrictions : MapFeatureModes.defaultMode])
+        
         defaultLocationIndicator = LocationIndicator()
         customLocationIndicator = createCustomLocationIndicator()
 
@@ -132,6 +133,10 @@ class ViewController: UIViewController, AnimationDelegate, LocationDelegate {
 
     // Calculate a fixed route for testing and start guidance simulation along the route.
     @IBAction func startButtonClicked(_ sender: Any) {
+        if isVisualNavigatorRenderingStarted {
+            return;
+        }
+
         let startWaypoint = Waypoint(coordinates: routeStartGeoCoordinates)
         let destinationWaypoint = Waypoint(coordinates: GeoCoordinates(latitude: 52.530905, longitude: 13.385007))
 
@@ -153,7 +158,7 @@ class ViewController: UIViewController, AnimationDelegate, LocationDelegate {
         stopGuidance()
     }
 
-    // Toogle between the default LocationIndicator and custom LocationIndicator.
+    // Toggle between the default LocationIndicator and custom LocationIndicator.
     // The default LocationIndicator uses a 3D asset that is part of the HERE SDK.
     // The custom LocationIndicator uses different 3D assets, see asset folder.
     @IBAction func toggleButtonClicked(_ sender: Any) {
@@ -211,23 +216,35 @@ class ViewController: UIViewController, AnimationDelegate, LocationDelegate {
             // including a bearing direction.
             // For testing purposes, we create below a Location object. Usually, you want to get this from
             // a GPS sensor instead. Check the Positioning example app for this.
-            return Location(coordinates: routeStartGeoCoordinates,
-                            timestamp: Date())
+            var location = Location(coordinates: routeStartGeoCoordinates)
+            location.time = Date()
+            return location
         }
 
         // This location is taken from the LocationSimulator that provides locations along the route.
         return lastKnownLocation!
     }
 
+    // Animate to custom guidance perspective, centered on start location of route.
     private func animateToRouteStart() {
-        // Animate to custom guidance perspective, centered on start location of route.
+        // The first coordinate marks the start location of the route.
+        let routeStart = myRoute!.geometry.vertices.first!
+        let geoCoordinatesUpdate = GeoCoordinatesUpdate(routeStart)
+        
         let bearingInDegrees: Double? = nil
         let tiltInDegrees: Double = 70
-        mapView.camera.flyTo(target: myRoute!.geometry.vertices.first!, // The first coordinate marks the start location of the route.
-                             orientation: GeoOrientationUpdate(bearing: bearingInDegrees, tilt: tiltInDegrees),
-                             distanceInMeters: 50,
-                             animationOptions: MapCamera.FlyToOptions(),
-                             animationDelegate: self)
+        let orientationUpdate = GeoOrientationUpdate(bearing: bearingInDegrees, tilt: tiltInDegrees)
+        
+        let distanceInMeters: Double = 50
+        let mapMeasure = MapMeasure(kind: .distance, value: distanceInMeters)
+
+        let durationInSeconds: TimeInterval = 3
+        let animation = MapCameraAnimationFactory.flyTo(target: geoCoordinatesUpdate,
+                                                        orientation: orientationUpdate,
+                                                        zoom: mapMeasure,
+                                                        bowFactor: 1,
+                                                        duration: durationInSeconds)
+        mapView.camera.startAnimation(animation, animationDelegate: self)
     }
 
     // Conforming to AnimationDelegate.
@@ -239,20 +256,32 @@ class ViewController: UIViewController, AnimationDelegate, LocationDelegate {
     }
 
     private func animateToDefaultMapPerspective() {
+        let target = mapView.camera.state.targetCoordinates
+        let geoCoordinatesUpdate = GeoCoordinatesUpdate(target)
+        
         // By setting nil we keep the current bearing rotation of the map.
         let bearingInDegrees: Double? = nil
         let tiltInDegrees: Double = 0
+        let orientationUpdate = GeoOrientationUpdate(bearing: bearingInDegrees, tilt: tiltInDegrees)
+        
+        let mapMeasure = MapMeasure(kind: .distance, value: distanceInMeters)
 
-        mapView.camera.flyTo(target: mapView.camera.state.targetCoordinates,
-                             orientation: GeoOrientationUpdate(bearing: bearingInDegrees, tilt: tiltInDegrees),
-                             distanceInMeters: distanceInMeters,
-                             animationOptions: MapCamera.FlyToOptions())
+        let durationInSeconds: TimeInterval = 3
+        let animation = MapCameraAnimationFactory.flyTo(target: geoCoordinatesUpdate,
+                                                        orientation: orientationUpdate,
+                                                        zoom: mapMeasure,
+                                                        bowFactor: 1,
+                                                        duration: durationInSeconds)
+        mapView.camera.startAnimation(animation)        
     }
 
     private func startGuidance(route: Route) {
         if isVisualNavigatorRenderingStarted {
             return
         }
+        
+        // Set the route and maneuver arrow color.
+        customizeVisualNavigatorColors()
 
         // Set custom guidance perspective.
         customizeGuidanceView()
@@ -281,22 +310,46 @@ class ViewController: UIViewController, AnimationDelegate, LocationDelegate {
 
         // Note: By default, when VisualNavigator stops rendering, no LocationIndicator is visible.
         switchToPedestrianLocationIndicator()
-
+        
         animateToDefaultMapPerspective()
     }
 
+    private func customizeVisualNavigatorColors() {
+        let routeAheadColor = UIColor.blue
+        let routeBehindColor = UIColor.red
+        let routeAheadOutlineColor = UIColor.yellow
+        let routeBehindOutlineColor = UIColor.gray
+        let maneuverArrowColor = UIColor.green
+
+        let visualNavigatorColors = VisualNavigatorColors.dayColors()
+        let routeProgressColors = RouteProgressColors(
+            ahead: routeAheadColor,
+            behind: routeBehindColor,
+            outlineAhead: routeAheadOutlineColor,
+            outlineBehind: routeBehindOutlineColor
+        )
+
+        // Sets the color used to draw maneuver arrows.
+        visualNavigatorColors.maneuverArrowColor = maneuverArrowColor
+        // Sets route color for a single transport mode. Other modes are kept using defaults.
+        visualNavigatorColors.setRouteProgressColors(sectionTransportMode: SectionTransportMode.car, routeProgressColors: routeProgressColors)
+        // Sets the adjusted colors for route progress and maneuver arrows based on the day color scheme.
+        visualNavigator?.colors = visualNavigatorColors
+    }
+    
     private func customizeGuidanceView() {
+        let cameraBehavior = FixedCameraBehavior()
+        
         // Set custom zoom level and tilt.
-        let cameraDistanceInMeters: Double = 50 // Defaults to 150.
-        let cameraTiltInDegrees: Double = 70 // Defaults to 50.
-        // Disable North-Up mode by setting null. Enable North-up mode by setting 0.
+        cameraBehavior.cameraDistanceInMeters = 50 // Defaults to 150.
+        cameraBehavior.cameraTiltInDegrees = 70 // Defaults to 50.
+        // Disable North-Up mode by setting nil. Enable North-up mode by setting 0.
         // By default, North-Up mode is disabled.
-        let cameraBearingInDegrees: Double? = nil
+        cameraBehavior.cameraBearingInDegrees = nil
 
         // The CameraSettings can be updated during guidance at any time as often as desired.
-        visualNavigator?.cameraSettings = CameraSettings(cameraDistanceInMeters: cameraDistanceInMeters,
-                                                         cameraTiltInDegrees: cameraTiltInDegrees,
-                                                         cameraBearingInDegrees: cameraBearingInDegrees)
+        // Alternatively, set DynamicCameraBehavior to enable auto-zoom.
+        visualNavigator?.cameraBehavior = cameraBehavior
     }
 
     private func startRouteSimulation(route: Route) {

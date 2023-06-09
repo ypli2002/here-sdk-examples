@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -59,11 +59,21 @@ class PermissionsRequestor {
         }
     }
 
+    @SuppressWarnings("deprecation")
     private String[] getPermissionsToRequest() {
         ArrayList<String> permissionList = new ArrayList<>();
         try {
-            PackageInfo packageInfo = activity.getPackageManager().getPackageInfo(
-                    activity.getPackageName(), PackageManager.GET_PERMISSIONS);
+            String packageName = activity.getPackageName();
+            PackageInfo packageInfo;
+            if (Build.VERSION.SDK_INT >= 33) {
+                packageInfo = activity.getPackageManager().getPackageInfo(
+                        packageName,
+                        PackageManager.PackageInfoFlags.of(PackageManager.GET_PERMISSIONS));
+            } else {
+                packageInfo = activity.getPackageManager().getPackageInfo(
+                        packageName,
+                        PackageManager.GET_PERMISSIONS);
+            }
             if (packageInfo.requestedPermissions != null) {
                 for (String permission : packageInfo.requestedPermissions) {
                     if (ContextCompat.checkSelfPermission(
@@ -76,8 +86,7 @@ class PermissionsRequestor {
                             continue;
                         }
                         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-                                (permission.equals(Manifest.permission.ACTIVITY_RECOGNITION) ||
-                                        permission.equals(Manifest.permission.ACCESS_BACKGROUND_LOCATION))) {
+                            permission.equals(Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
                             continue;
                         }
                         permissionList.add(permission);

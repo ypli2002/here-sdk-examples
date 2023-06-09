@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,8 +32,8 @@ class CameraExample {
   CameraExample(HereMapController hereMapController) : _hereMapController = hereMapController {
     // Set initial map center to a location in Berlin.
     GeoCoordinates mapCenter = GeoCoordinates(52.530932, 13.384915);
-    _hereMapController.camera.lookAtPointWithDistance(mapCenter, distanceToEarthInMeters);
-    _setNewMapCircle(mapCenter);
+    MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
+    _hereMapController.camera.lookAtPointWithMeasure(mapCenter, mapMeasureZoom);
   }
 
   void move() {
@@ -42,7 +42,15 @@ class CameraExample {
     // Indicate the new map center with a circle.
     _setNewMapCircle(newTarget);
 
-    _hereMapController.camera.flyToWithOptions(newTarget, MapCameraFlyToOptions.withDefaults());
+    _flyTo(newTarget);
+  }
+
+  void _flyTo(GeoCoordinates geoCoordinates) {
+    GeoCoordinatesUpdate geoCoordinatesUpdate = GeoCoordinatesUpdate.fromGeoCoordinates(geoCoordinates);
+    double bowFactor = 1;
+    MapCameraAnimation animation =
+        MapCameraAnimationFactory.flyTo(geoCoordinatesUpdate, bowFactor, Duration(seconds: 3));
+    _hereMapController.camera.startAnimation(animation);
   }
 
   void _setNewMapCircle(GeoCoordinates geoCoordinates) {

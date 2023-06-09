@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:here_sdk/core.dart';
 import 'package:here_sdk/gestures.dart';
@@ -45,8 +46,9 @@ class MapItemsExample {
       : _showDialog = showDialogCallback,
         _hereMapController = hereMapController {
     double distanceToEarthInMeters = 8000;
+    MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
     _hereMapController.camera
-        .lookAtPointWithDistance(GeoCoordinates(52.51760485151816, 13.380312380535472), distanceToEarthInMeters);
+        .lookAtPointWithMeasure(GeoCoordinates(52.51760485151816, 13.380312380535472), mapMeasureZoom);
 
     // Setting a tap handler to pick markers from map.
     _setTapGestureHandler();
@@ -84,20 +86,28 @@ class MapItemsExample {
   Future<void> showMapMarkerCluster() async {
     // Reuse existing MapImage for new map markers.
     if (_blueSquareMapImage == null) {
-      Uint8List imagePixelData = await _loadFileAsUint8List('assets/blue_square.png');
+      Uint8List imagePixelData = await _loadFileAsUint8List('assets/green_square.png');
       _blueSquareMapImage = MapImage.withPixelDataAndImageFormat(imagePixelData, ImageFormat.png);
     }
 
-    MapMarkerCluster mapMarkerCluster = MapMarkerCluster(MapMarkerClusterImageStyle(_blueSquareMapImage!));
+    // Defines a text that indicates how many markers are included in the cluster.
+    MapMarkerClusterCounterStyle counterStyle = MapMarkerClusterCounterStyle();
+    counterStyle.textColor = Colors.black;
+    counterStyle.fontSize = 40;
+    counterStyle.maxCountNumber = 9;
+    counterStyle.aboveMaxText = "+9";
+
+    MapMarkerCluster mapMarkerCluster =
+        MapMarkerCluster.WithCounter(MapMarkerClusterImageStyle(_blueSquareMapImage!), counterStyle);
     _hereMapController.mapScene.addMapMarkerCluster(mapMarkerCluster);
     _mapMarkerClusterList.add(mapMarkerCluster);
 
     for (int i = 0; i < 10; i++) {
-      mapMarkerCluster.addMapMarker(await _createRandomMapMarkerInViewport());
+      mapMarkerCluster.addMapMarker(await _createRandomMapMarkerInViewport(i.toString()));
     }
   }
 
-  Future<MapMarker> _createRandomMapMarkerInViewport() async {
+  Future<MapMarker> _createRandomMapMarkerInViewport(String metaDataText) async {
     // Reuse existing MapImage for new map markers.
     if (_greenSquareMapImage == null) {
       Uint8List imagePixelData = await _loadFileAsUint8List('assets/green_square.png');
@@ -105,6 +115,11 @@ class MapItemsExample {
     }
 
     MapMarker mapMarker = MapMarker(_createRandomGeoCoordinatesAroundMapCenter(), _greenSquareMapImage!);
+
+    Metadata metadata = new Metadata();
+    metadata.setString("key_cluster", metaDataText);
+    mapMarker.metadata = metadata;
+
     return mapMarker;
   }
 
@@ -126,14 +141,28 @@ class MapItemsExample {
     _addLocationIndicator(geoCoordinates, LocationIndicatorIndicatorStyle.navigation);
   }
 
-  void showFlatMapMarkers() {
+  void showFlatMapMarker() {
+    // Tilt the map for a better 3D effect.
+    _tiltMap();
+
+    GeoCoordinates geoCoordinates = _createRandomGeoCoordinatesAroundMapCenter();
+
+    // It's origin is centered on the location.
+    _addFlatMarker(geoCoordinates);
+
+    // A centered 2D map marker to indicate the exact location.
+    // Note that 3D map markers are always drawn on top of 2D map markers.
+    _addCircleMapMarker(geoCoordinates, 1);
+  }
+
+  void show2DTexture() {
     // Tilt the map for a better 3D effect.
     _tiltMap();
 
     GeoCoordinates geoCoordinates = _createRandomGeoCoordinatesAroundMapCenter();
 
     // Adds a flat POI marker that rotates and tilts together with the map.
-    _addFlatMarker3D(geoCoordinates);
+    _add2DTexture(geoCoordinates);
 
     // A centered 2D map marker to indicate the exact location.
     // Note that 3D map markers are always drawn on top of 2D map markers.
@@ -217,6 +246,9 @@ class MapItemsExample {
     MapMarker mapMarker = MapMarker(geoCoordinates, _circleMapImage!);
     mapMarker.drawOrder = drawOrder;
 
+    // Optionally, enable a fade in-out animation.
+    mapMarker.fadeDuration = Duration(seconds: 3);
+
     _hereMapController.mapScene.addMapMarker(mapMarker);
     _mapMarkerList.add(mapMarker);
   }
@@ -239,7 +271,23 @@ class MapItemsExample {
     _locationIndicatorList.add(locationIndicator);
   }
 
-  void _addFlatMarker3D(GeoCoordinates geoCoordinates) {
+  void _addFlatMarker(GeoCoordinates geoCoordinates) async {
+    Uint8List imagePixelData = await _loadFileAsUint8List('assets/poi.png');
+    MapImage mapImage = MapImage.withPixelDataAndImageFormat(imagePixelData, ImageFormat.png);
+
+    // The default scale factor of the map marker is 1.0. For a scale of 2, the map marker becomes 2x larger.
+    // For a scale of 0.5, the map marker shrinks to half of its original size.
+    double scaleFactor = 0.5;
+
+    // With DENSITY_INDEPENDENT_PIXELS the map marker will have a constant size on the screen regardless if the map is zoomed in or out.
+    MapMarker3D mapMarker3D =
+        MapMarker3D.fromImage(geoCoordinates, mapImage, scaleFactor, RenderSizeUnit.densityIndependentPixels);
+
+    _hereMapController.mapScene.addMapMarker3d(mapMarker3D);
+    _mapMarker3DList.add(mapMarker3D);
+  }
+
+  void _add2DTexture(GeoCoordinates geoCoordinates) {
     // Place the files in the "assets" directory as specified in pubspec.yaml.
     // Adjust file name and path as appropriate for your project.
     // Note: The bottom of the plane is centered on the origin.
@@ -273,10 +321,22 @@ class MapItemsExample {
     String geometryFilePath = "assets/models/obstacle.obj";
     String textureFilePath = "assets/models/obstacle_texture.png";
 
+    // Without depth check, 3D models are rendered on top of everything. With depth check enabled,
+    // it may be hidden by buildings. In addition:
+    // If a 3D object has its center at the origin of its internal coordinate system,
+    // then parts of it may be rendered below the ground surface (altitude < 0).
+    // Note that the HERE SDK map surface is flat, following a Mercator or Globe projection.
+    // Therefore, a 3D object becomes visible when the altitude of its location is 0 or higher.
+    // By default, without setting a scale factor, 1 unit in 3D coordinate space equals 1 meter.
+    var altitude = 18.0;
+    GeoCoordinates geoCoordinatesWithAltitude =
+        GeoCoordinates.withAltitude(geoCoordinates.latitude, geoCoordinates.longitude, altitude);
+
     // Optionally, consider to store the model for reuse (like we showed for MapImages above).
     MapMarker3DModel mapMarker3DModel = MapMarker3DModel.withTextureFilePath(geometryFilePath, textureFilePath);
-    MapMarker3D mapMarker3D = MapMarker3D(geoCoordinates, mapMarker3DModel);
+    MapMarker3D mapMarker3D = MapMarker3D(geoCoordinatesWithAltitude, mapMarker3DModel);
     mapMarker3D.scale = 6;
+    mapMarker3D.isDepthCheckEnabled = true;
 
     _hereMapController.mapScene.addMapMarker3d(mapMarker3D);
     _mapMarker3DList.add(mapMarker3D);
@@ -339,14 +399,35 @@ class MapItemsExample {
       return;
     }
     if (clusterSize == 1) {
-      _showDialog("Map marker picked", "This MapMarker belongs to a cluster.");
+      _showDialog("Map marker picked",
+          "This MapMarker belongs to a cluster.  Metadata: " + _getClusterMetadata(topmostGrouping.markers.first));
     } else {
+      String metadata = "";
+      topmostGrouping.markers.forEach((element) {
+        metadata += _getClusterMetadata(element);
+        metadata += " ";
+      });
       int totalSize = topmostGrouping.parent.markers.length;
       _showDialog(
           "Map marker cluster picked",
           "Number of contained markers in this cluster: $clusterSize." +
+              "Contained Metadata: " +
+              metadata +
+              ". " +
               "Total number of markers in this MapMarkerCluster: $totalSize.");
     }
+  }
+
+  String _getClusterMetadata(MapMarker mapMarker) {
+    Metadata? metadata = mapMarker.metadata;
+    String message = "No metadata.";
+    if (metadata != null) {
+      String? string = metadata.getString("key_cluster");
+      if (string != null) {
+        message = string;
+      }
+    }
+    return message;
   }
 
   void _tiltMap() {

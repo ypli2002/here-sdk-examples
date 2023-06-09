@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 HERE Europe B.V.
+ * Copyright (C) 2020-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:here_sdk/consent.dart' show ConsentEngine, ConsentUserReply;
 import 'package:here_sdk/core.dart';
+import 'package:here_sdk/core.engine.dart';
+import 'package:here_sdk/core.errors.dart';
 import 'package:here_sdk/location.dart';
 import 'package:here_sdk/mapview.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -41,8 +43,8 @@ class PositioningExample extends State<MyApp>
   static const double _cameraDistanceInMeters = 400;
   static final GeoCoordinates _defaultGeoCoordinates = GeoCoordinates(52.530932, 13.384915);
 
-  final LocationEngine _locationEngine = LocationEngine();
-  final ConsentEngine _consentEngine = ConsentEngine();
+  LocationEngine? _locationEngine;
+  ConsentEngine? _consentEngine;
 
   HereMapController? _hereMapController;
   LocationIndicator? _locationIndicator;
@@ -65,6 +67,11 @@ class PositioningExample extends State<MyApp>
   @override
   void dispose() {
     WidgetsBinding.instance!.removeObserver(this);
+
+    // Free HERE SDK resources before the application shuts down.
+    SDKNativeEngine.sharedInstance?.dispose();
+    SdkContext.release();
+
     super.dispose();
   }
 
@@ -73,7 +80,9 @@ class PositioningExample extends State<MyApp>
     if (state == AppLifecycleState.detached) {
       _stopLocating();
     } else if (state == AppLifecycleState.resumed) {
-      _startLocating();
+      if (_locationEngine != null) {
+        _startLocating();
+      }
     }
   }
 
@@ -161,9 +170,9 @@ class PositioningExample extends State<MyApp>
 
   Future<void> _ensureUserConsentRequested() async {
     // Check if user consent has been handled.
-    if (_consentEngine.userConsentState == ConsentUserReply.notHandled) {
+    if (_consentEngine!.userConsentState == ConsentUserReply.notHandled) {
       // Show dialog.
-      await _consentEngine.requestUserConsent(context);
+      await _consentEngine!.requestUserConsent(context);
     }
 
     _updateConsentInfo();
@@ -172,7 +181,7 @@ class PositioningExample extends State<MyApp>
 
   Future<void> _requestConsent() async {
     if (Platform.isAndroid) {
-      await _consentEngine.requestUserConsent(context);
+      await _consentEngine!.requestUserConsent(context);
       _updateConsentInfo();
     }
   }
@@ -186,7 +195,7 @@ class PositioningExample extends State<MyApp>
       return;
     }
 
-    if (_consentEngine.userConsentState == ConsentUserReply.granted) {
+    if (_consentEngine!.userConsentState == ConsentUserReply.granted) {
       setState(() {
         _consentState = _consentGranted;
       });
@@ -216,6 +225,18 @@ class PositioningExample extends State<MyApp>
   }
 
   void _onMapCreated(HereMapController hereMapController) {
+    try {
+      _locationEngine = LocationEngine();
+    } on InstantiationException {
+      throw ("Initialization of LocationEngine failed.");
+    }
+
+    try {
+      _consentEngine = ConsentEngine();
+    } on InstantiationException {
+      throw ("Initialization of ConsentEngine failed.");
+    }
+
     _hereMapController = hereMapController;
     hereMapController.mapScene.loadSceneForMapScheme(MapScheme.normalDay, (MapError? error) async {
       if (error == null) {
@@ -243,7 +264,7 @@ class PositioningExample extends State<MyApp>
   }
 
   void _startLocating() {
-    Location? location = _locationEngine.lastKnownLocation;
+    Location? location = _locationEngine!.lastKnownLocation;
 
     if (location != null) {
       print("Last known location: " +
@@ -257,30 +278,38 @@ class PositioningExample extends State<MyApp>
 
     _addMyLocationToMap(location);
 
-    _locationEngine.addLocationListener(this);
-    _locationEngine.addLocationStatusListener(this);
-    _locationEngine.startWithLocationAccuracy(LocationAccuracy.bestAvailable);
+    // Enable background updates on iOS.
+    _locationEngine!.setBackgroundLocationAllowed(true);
+    _locationEngine!.setBackgroundLocationIndicatorVisible(true);
+
+    // Set delegates and start location engine.
+    _locationEngine!.addLocationListener(this);
+    _locationEngine!.addLocationStatusListener(this);
+    _locationEngine!.startWithLocationAccuracy(LocationAccuracy.bestAvailable);
   }
 
   void _stopLocating() {
-    _locationEngine.removeLocationStatusListener(this);
-    _locationEngine.removeLocationListener(this);
-    _locationEngine.stop();
+    _locationEngine!.removeLocationStatusListener(this);
+    _locationEngine!.removeLocationListener(this);
+    _locationEngine!.stop();
   }
 
   void _addMyLocationToMap(Location myLocation) {
     if (_locationIndicator != null) {
-      _hereMapController?.removeLifecycleListener(_locationIndicator!);
+      return;
     }
     // Set-up location indicator.
     _locationIndicator = LocationIndicator();
-    _locationIndicator?.locationIndicatorStyle = LocationIndicatorIndicatorStyle.pedestrian;
-    _locationIndicator?.updateLocation(myLocation);
-    _hereMapController?.addLifecycleListener(_locationIndicator!);
+    // Enable a halo to indicate the horizontal accuracy.
+    _locationIndicator!.isAccuracyVisualized = true;
+    _locationIndicator!.locationIndicatorStyle = LocationIndicatorIndicatorStyle.pedestrian;
+    _locationIndicator!.updateLocation(myLocation);
+    _hereMapController!.addLifecycleListener(_locationIndicator!);
     // Point camera at given location.
-    _hereMapController?.camera.lookAtPointWithDistance(
+    MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, _cameraDistanceInMeters);
+    _hereMapController!.camera.lookAtPointWithMeasure(
       myLocation.coordinates,
-      _cameraDistanceInMeters,
+      mapMeasureZoom,
     );
     // Update state's location.
     setState(() {
@@ -294,9 +323,9 @@ class PositioningExample extends State<MyApp>
     }
 
     // Update location indicator's location.
-    _locationIndicator?.updateLocation(myLocation);
+    _locationIndicator!.updateLocation(myLocation);
     // Point camera at given location.
-    _hereMapController?.camera.lookAtPoint(myLocation.coordinates);
+    _hereMapController!.camera.lookAtPoint(myLocation.coordinates);
     // Update state's location.
     setState(() {
       _location = myLocation;
@@ -324,11 +353,6 @@ class PositioningExample extends State<MyApp>
     setState(() {
       _status = locationEngineStatus;
     });
-  }
-
-  @override
-  void release() {
-    // Nothing to do here.
   }
 
   Widget _buildLabelValue(String text, String value) {
@@ -433,6 +457,6 @@ class PositioningExample extends State<MyApp>
   }
 
   String _getTimestampSinceBootString() {
-    return '${_location?.timestampSinceBootInMilliseconds?.toStringAsFixed(1) ?? _notAvailable}' + ' ms';
+    return '${_location?.timestampSinceBoot?.toString() ?? _notAvailable}' + ' ms';
   }
 }

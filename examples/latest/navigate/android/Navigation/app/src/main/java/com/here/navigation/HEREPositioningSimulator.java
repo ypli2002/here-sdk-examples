@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import com.here.sdk.core.errors.InstantiationErrorException;
 import com.here.sdk.navigation.LocationSimulator;
 import com.here.sdk.navigation.LocationSimulatorOptions;
 import com.here.sdk.routing.Route;
+import com.here.time.Duration;
 
 // A class that provides simulated location updates along a given route.
 // The frequency of the provided updates can be set via LocationSimulatorOptions.
@@ -52,7 +53,7 @@ public class HEREPositioningSimulator {
     private LocationSimulator createLocationSimulator(LocationListener locationListener, Route route) {
         LocationSimulatorOptions locationSimulatorOptions = new LocationSimulatorOptions();
         locationSimulatorOptions.speedFactor = 2;
-        locationSimulatorOptions.notificationIntervalInMilliseconds = 500;
+        locationSimulatorOptions.notificationInterval = Duration.ofMillis(500);
 
         LocationSimulator locationSimulator;
 

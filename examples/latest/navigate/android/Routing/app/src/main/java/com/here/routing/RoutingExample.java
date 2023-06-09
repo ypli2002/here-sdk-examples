@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,10 +30,12 @@ import com.here.sdk.core.GeoCoordinates;
 import com.here.sdk.core.GeoPolyline;
 import com.here.sdk.core.Point2D;
 import com.here.sdk.core.errors.InstantiationErrorException;
+import com.here.sdk.core.threading.TaskHandle;
 import com.here.sdk.mapview.MapCamera;
 import com.here.sdk.mapview.MapImage;
 import com.here.sdk.mapview.MapImageFactory;
 import com.here.sdk.mapview.MapMarker;
+import com.here.sdk.mapview.MapMeasure;
 import com.here.sdk.mapview.MapPolyline;
 import com.here.sdk.mapview.MapView;
 import com.here.sdk.routing.CalculateRouteCallback;
@@ -45,6 +47,8 @@ import com.here.sdk.routing.RoutingEngine;
 import com.here.sdk.routing.RoutingError;
 import com.here.sdk.routing.Section;
 import com.here.sdk.routing.SectionNotice;
+import com.here.sdk.routing.Span;
+import com.here.sdk.routing.TrafficSpeed;
 import com.here.sdk.routing.Waypoint;
 
 import java.text.DateFormat;
@@ -71,7 +75,8 @@ public class RoutingExample {
         this.mapView = mapView;
         MapCamera camera = mapView.getCamera();
         double distanceInMeters = 1000 * 10;
-        camera.lookAt(new GeoCoordinates(52.520798, 13.409408), distanceInMeters);
+        MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, distanceInMeters);
+        camera.lookAt(new GeoCoordinates(52.520798, 13.409408), mapMeasureZoom);
 
         try {
             routingEngine = new RoutingEngine();
@@ -121,23 +126,27 @@ public class RoutingExample {
     private void logRouteSectionDetails(Route route) {
         DateFormat dateFormat = new SimpleDateFormat("HH:mm");
 
-        for (int i = 0; i< route.getSections().size(); i++) {
+        for (int i = 0; i < route.getSections().size(); i++) {
             Section section = route.getSections().get(i);
 
-            Log.d(TAG, "Route Section : " + (i+1));
-            Log.d(TAG, "Route Section Departure Time : " + dateFormat.format(section.getDepartureTime()));
-            Log.d(TAG, "Route Section Arrival Time : " + dateFormat.format(section.getArrivalTime()));
-            Log.d(TAG, "Route Section length : " +  section.getLengthInMeters() + " m");
+            Log.d(TAG, "Route Section : " + (i + 1));
+            Log.d(TAG, "Route Section Departure Time : "
+                    + dateFormat.format(section.getDepartureLocationTime().localTime));
+            Log.d(TAG, "Route Section Arrival Time : "
+                    + dateFormat.format(section.getArrivalLocationTime().localTime));
+            Log.d(TAG, "Route Section length : " + section.getLengthInMeters() + " m");
             Log.d(TAG, "Route Section duration : " + section.getDuration().getSeconds() + " s");
         }
     }
 
     private void showRouteDetails(Route route) {
         long estimatedTravelTimeInSeconds = route.getDuration().getSeconds();
+        long estimatedTrafficDelayInSeconds = route.getTrafficDelay().getSeconds();
         int lengthInMeters = route.getLengthInMeters();
 
         String routeDetails = "Travel Time: " + formatTime(estimatedTravelTimeInSeconds)
-                            + ", Length: " + formatLength(lengthInMeters);
+                + ", traffic delay: " + formatTime(estimatedTrafficDelayInSeconds)
+                + ", Length: " + formatLength(lengthInMeters);
 
         showDialog("Route Details", routeDetails);
     }
@@ -169,6 +178,9 @@ public class RoutingExample {
 
         mapView.getMapScene().addMapPolyline(routeMapPolyline);
         mapPolylines.add(routeMapPolyline);
+
+        // Optionally, render traffic on route.
+        showTrafficOnRoute(route);
 
         GeoCoordinates startPoint =
                 route.getSections().get(0).getDeparturePlace().mapMatchedCoordinates;
@@ -250,6 +262,55 @@ public class RoutingExample {
             mapView.getMapScene().removeMapPolyline(mapPolyline);
         }
         mapPolylines.clear();
+    }
+
+    // This renders the traffic jam factor on top of the route as multiple MapPolylines per span.
+    private void showTrafficOnRoute(Route route) {
+        if (route.getLengthInMeters() / 1000 > 5000) {
+            Log.d(TAG, "Skip showing traffic-on-route for longer routes.");
+            return;
+        }
+
+        for (Section section : route.getSections()) {
+            for (Span span : section.getSpans()) {
+                TrafficSpeed trafficSpeed = span.getTrafficSpeed();
+                Color lineColor = getTrafficColor(trafficSpeed.jamFactor);
+                if (lineColor == null) {
+                    // We skip rendering low traffic.
+                    continue;
+                }
+                GeoPolyline spanGeoPolyline;
+                try {
+                    // A polyline needs to have two or more coordinates.
+                    spanGeoPolyline = new GeoPolyline(span.getPolyline());
+                } catch (InstantiationErrorException e) {
+                    e.printStackTrace();
+                    return;
+                }
+                float widthInPixels = 10;
+                MapPolyline trafficSpanMapPolyline = new MapPolyline(spanGeoPolyline, widthInPixels, lineColor);
+                mapView.getMapScene().addMapPolyline(trafficSpanMapPolyline);
+                mapPolylines.add(trafficSpanMapPolyline);
+            }
+        }
+    }
+
+    // Define a traffic color scheme based on the route's jam factor.
+    // 0 <= jamFactor < 4: No or light traffic.
+    // 4 <= jamFactor < 8: Moderate or slow traffic.
+    // 8 <= jamFactor < 10: Severe traffic.
+    // jamFactor = 10: No traffic, ie. the road is blocked.
+    // Returns null in case of no or light traffic.
+    @Nullable
+    private Color getTrafficColor(Double jamFactor) {
+        if (jamFactor == null || jamFactor < 4) {
+            return null;
+        } else if (jamFactor >= 4 && jamFactor < 8) {
+            return Color.valueOf(1, 1, 0, 0.63f); // Yellow
+        } else if (jamFactor >= 8 && jamFactor < 10) {
+            return Color.valueOf(1, 0, 0, 0.63f); // Red
+        }
+        return Color.valueOf(0, 0, 0, 0.63f); // Black
     }
 
     private GeoCoordinates createRandomGeoCoordinatesAroundMapCenter() {

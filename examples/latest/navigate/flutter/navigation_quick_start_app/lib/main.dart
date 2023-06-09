@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,15 +19,34 @@
 
 import 'package:flutter/material.dart';
 import 'package:here_sdk/core.dart' as HERE;
+import 'package:here_sdk/core.engine.dart';
 import 'package:here_sdk/core.errors.dart';
 import 'package:here_sdk/mapview.dart';
 import 'package:here_sdk/navigation.dart' as HERE;
 import 'package:here_sdk/routing.dart' as HERE;
 
 void main() {
-  HERE.SdkContext.init(HERE.IsolateOrigin.main);
+  // Usually, you need to initialize the HERE SDK only once during the lifetime of an application.
+  _initializeHERESDK();
+
   // Ensure that all widgets, including MyApp, have a MaterialLocalizations object available.
   runApp(MaterialApp(home: MyApp()));
+}
+
+void _initializeHERESDK() async {
+  // Needs to be called before accessing SDKOptions to load necessary libraries.
+  HERE.SdkContext.init(HERE.IsolateOrigin.main);
+
+  // Set your credentials for the HERE SDK.
+  String accessKeyId = "YOUR_ACCESS_KEY_ID";
+  String accessKeySecret = "YOUR_ACCESS_KEY_SECRET";
+  SDKOptions sdkOptions = SDKOptions.withAccessKeySecret(accessKeyId, accessKeySecret);
+
+  try {
+    await SDKNativeEngine.makeSharedInstance(sdkOptions);
+  } on InstantiationException {
+    throw Exception("Failed to initialize the HERE SDK.");
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -42,16 +61,28 @@ class _MyAppState extends State<MyApp> {
   HERE.VisualNavigator? _visualNavigator;
   HERE.LocationSimulator? _locationSimulator;
 
+  Future<bool> _handleBackPress() async {
+    // Handle the back press.
+    _visualNavigator?.stopRendering();
+    _locationSimulator?.stop();
+
+    // Return true to allow the back press.
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Navigation QS Example'),
-      ),
-      body: Stack(
-        children: [
-          HereMap(onMapCreated: _onMapCreated),
-        ],
+    return WillPopScope(
+      onWillPop: _handleBackPress,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text('Navigation QS Example'),
+        ),
+        body: Stack(
+          children: [
+            HereMap(onMapCreated: _onMapCreated),
+          ],
+        ),
       ),
     );
   }
@@ -65,8 +96,9 @@ class _MyAppState extends State<MyApp> {
       }
 
       const double distanceToEarthInMeters = 8000;
-      _hereMapController!.camera
-          .lookAtPointWithDistance(HERE.GeoCoordinates(52.520798, 13.409408), distanceToEarthInMeters);
+      MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
+      _hereMapController!.camera.lookAtPointWithMeasure(HERE.GeoCoordinates(52.520798, 13.409408), mapMeasureZoom);
+
       _startGuidanceExample();
     });
   }
@@ -89,7 +121,7 @@ class _MyAppState extends State<MyApp> {
     HERE.Waypoint startWaypoint = HERE.Waypoint(HERE.GeoCoordinates(52.520798, 13.409408));
     HERE.Waypoint destinationWaypoint = HERE.Waypoint(HERE.GeoCoordinates(52.530905, 13.385007));
 
-    _routingEngine!.calculateCarRoute([startWaypoint, destinationWaypoint], HERE.CarOptions.withDefaults(),
+    _routingEngine!.calculateCarRoute([startWaypoint, destinationWaypoint], HERE.CarOptions(),
         (HERE.RoutingError? routingError, List<HERE.Route>? routeList) async {
       if (routingError == null) {
         // When error is null, it is guaranteed that the routeList is not empty.
@@ -130,13 +162,21 @@ class _MyAppState extends State<MyApp> {
   _setupLocationSource(HERE.LocationListener locationListener, HERE.Route route) {
     try {
       // Provides fake GPS signals based on the route geometry.
-      _locationSimulator = HERE.LocationSimulator.withRoute(route, HERE.LocationSimulatorOptions.withDefaults());
+      _locationSimulator = HERE.LocationSimulator.withRoute(route, HERE.LocationSimulatorOptions());
     } on InstantiationException {
       throw Exception("Initialization of LocationSimulator failed.");
     }
 
     _locationSimulator!.listener = locationListener;
     _locationSimulator!.start();
+  }
+
+  @override
+  void dispose() {
+    // Free HERE SDK resources before the application shuts down.
+    SDKNativeEngine.sharedInstance?.dispose();
+    HERE.SdkContext.release();
+    super.dispose();
   }
 
   // A helper method to show a dialog.

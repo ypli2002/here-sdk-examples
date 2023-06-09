@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,12 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:here_sdk/core.dart';
+import 'package:here_sdk/core.engine.dart';
 import 'package:here_sdk/core.errors.dart';
 import 'package:here_sdk/location.dart';
 import 'package:here_sdk/mapview.dart';
 import 'package:here_sdk/navigation.dart';
+import 'package:here_sdk/prefetcher.dart';
 import 'package:here_sdk/routing.dart' as HERE;
 import 'package:here_sdk/routing.dart';
 import 'package:here_sdk/trafficawarenavigation.dart';
@@ -38,32 +40,38 @@ import 'LanguageCodeConverter.dart';
 class NavigationExample {
   final HereMapController _hereMapController;
   late VisualNavigator _visualNavigator;
-  late HEREPositioningSimulator _locationSimulationProvider;
-  late HEREPositioningProvider _herePositioningProvider;
+  HEREPositioningSimulator _locationSimulationProvider;
+  HEREPositioningProvider _herePositioningProvider;
   late DynamicRoutingEngine _dynamicRoutingEngine;
   MapMatchedLocation? _lastMapMatchedLocation;
   int _previousManeuverIndex = -1;
   final ValueChanged<String> _updateMessageState;
+  RoutePrefetcher _routePrefetcher;
 
   NavigationExample(HereMapController hereMapController, ValueChanged<String> updateMessageState)
       : _hereMapController = hereMapController,
-        _updateMessageState = updateMessageState {
+        _updateMessageState = updateMessageState,
+        // For easy testing, this location provider simulates location events along a route.
+        // You can use HERE positioning to feed real locations, see the "Positioning"-section in
+        // our Developer's Guide for an example
+        _locationSimulationProvider = HEREPositioningSimulator(),
+        // Access the device's GPS sensor and other data.
+        _herePositioningProvider = HEREPositioningProvider(),
+        // The RoutePrefetcher downloads map data in advance into the map cache.
+        // This is not mandatory, but can help to improve the guidance experience.
+        _routePrefetcher = RoutePrefetcher(SDKNativeEngine.sharedInstance!) {
     try {
       _visualNavigator = VisualNavigator();
     } on InstantiationException {
       throw Exception("Initialization of VisualNavigator failed.");
     }
 
+    // Enable auto-zoom during guidance.
+    _visualNavigator.cameraBehavior = DynamicCameraBehavior();
+
     // This enables a navigation view including a rendered navigation arrow.
     _visualNavigator.startRendering(_hereMapController);
 
-    // For easy testing, this location provider simulates location events along a route.
-    // You can use HERE positioning to feed real locations, see the "Positioning"-section in
-    // our Developer's Guide for an example.
-    _locationSimulationProvider = HEREPositioningSimulator();
-
-    // Access the device's GPS sensor and other data.
-    _herePositioningProvider = HEREPositioningProvider();
     _herePositioningProvider.startLocating(_visualNavigator, LocationAccuracy.navigation);
 
     _createDynamicRoutingEngine();
@@ -71,16 +79,26 @@ class NavigationExample {
     setupListeners();
   }
 
+  void prefetchMapData(GeoCoordinates currentGeoCoordinates) {
+    // Prefetches map data around the provided location with a radius of 2 km into the map cache.
+    // For the best experience, prefetchAroundLocation() should be called as early as possible.
+    _routePrefetcher.prefetchAroundLocation(currentGeoCoordinates);
+    // Prefetches map data within a corridor along the route that is currently set to the provided Navigator instance.
+    // This happens continuously in discrete intervals.
+    // If no route is set, no data will be prefetched.
+    _routePrefetcher.prefetchAroundRouteOnIntervals(_visualNavigator);
+  }
+
   void _createDynamicRoutingEngine() {
-    var dynamicRoutingOptions = DynamicRoutingEngineOptions.withAllDefaults();
+    var dynamicRoutingOptions = DynamicRoutingEngineOptions();
     // We want an update for each poll iteration, so we specify 0 difference.
     dynamicRoutingOptions.minTimeDifference = Duration.zero;
     dynamicRoutingOptions.minTimeDifferencePercentage = 0.0;
-    dynamicRoutingOptions.pollIntervalInMinutes = 5;
+    dynamicRoutingOptions.pollInterval = Duration(minutes: 5);
 
     try {
       // With the dynamic routing engine you can poll the HERE backend services to search for routes with less traffic.
-      // THis can happen during guidance - or you can periodically update a route that is shown in a route planner.
+      // This can happen during guidance - or you can periodically update a route that is shown in a route planner.
       _dynamicRoutingEngine = DynamicRoutingEngine(dynamicRoutingOptions);
     } on InstantiationException {
       throw Exception("Initialization of DynamicRoutingEngine failed.");
@@ -105,6 +123,9 @@ class NavigationExample {
   }
 
   void startNavigation(HERE.Route route) {
+    GeoCoordinates startGeoCoordinates = route.geometry.vertices[0];
+    prefetchMapData(startGeoCoordinates);
+
     _prepareNavigation(route);
 
     // Stop in case it was started before.
@@ -127,8 +148,8 @@ class NavigationExample {
             print("DynamicRoutingEngine: etaDifferenceInSeconds: $etaDifferenceInSeconds.");
             print("DynamicRoutingEngine: distanceDifferenceInMeters: $distanceDifferenceInMeters.");
 
-            // An implementation can decide to switch to the new route:
-            // _visualNavigator.route = newRoute;
+            // An implementation needs to decide when to switch to the new route based
+            // on above criteria.
           }, (RoutingError routingError) {
             final error = routingError.toString();
             _updateMessageState("Error while dynamically searching for a better route: $error");
@@ -139,8 +160,9 @@ class NavigationExample {
   }
 
   void _prepareNavigation(HERE.Route route) {
-    setupSpeedWarnings();
-    setupVoiceTextMessages();
+    _setupSpeedWarnings();
+    _setupVoiceTextMessages();
+    _setupRealisticViewWarnings();
 
     // Set the route to follow.
     _visualNavigator.route = route;
@@ -148,9 +170,9 @@ class NavigationExample {
 
   void setTracking(bool isTracking) {
     if (isTracking) {
-      _visualNavigator.cameraMode = CameraTrackingMode.enabled;
+      _visualNavigator.cameraBehavior = DynamicCameraBehavior();
     } else {
-      _visualNavigator.cameraMode = CameraTrackingMode.disabled;
+      _visualNavigator.cameraBehavior = null;
     }
   }
 
@@ -158,6 +180,7 @@ class NavigationExample {
     // Stop in case it was started before.
     _locationSimulationProvider.stop();
     _dynamicRoutingEngine.stop();
+    _routePrefetcher.stopPrefetchAroundRoute();
     startTracking();
     _updateMessageState("Tracking device's location.");
   }
@@ -166,6 +189,10 @@ class NavigationExample {
     // It is recommended to stop rendering before leaving the app.
     // This also removes the current location marker.
     _visualNavigator.stopRendering();
+
+    // Stop LocationSimulator and DynamicRoutingEngine in case they were started before.
+    _locationSimulationProvider.stop();
+    _dynamicRoutingEngine.stop();
 
     // It is recommended to stop the LocationEngine before leaving the app.
     _herePositioningProvider.stop();
@@ -183,9 +210,9 @@ class NavigationExample {
     RoadTexts nextRoadTexts = maneuver.nextRoadTexts;
 
     String? currentRoadName = currentRoadTexts.names.getDefaultValue();
-    String? currentRoadNumber = currentRoadTexts.numbers.getDefaultValue();
+    String? currentRoadNumber = currentRoadTexts.numbersWithDirection.getDefaultValue();
     String? nextRoadName = nextRoadTexts.names.getDefaultValue();
-    String? nextRoadNumber = nextRoadTexts.numbers.getDefaultValue();
+    String? nextRoadNumber = nextRoadTexts.numbersWithDirection.getDefaultValue();
 
     String? roadName = nextRoadName == null ? nextRoadNumber : nextRoadName;
 
@@ -284,7 +311,8 @@ class NavigationExample {
     });
 
     // Notifies when a waypoint on the route is reached or missed
-    _visualNavigator.milestoneStatusListener = MilestoneStatusListener((Milestone milestone, MilestoneStatus milestoneStatus) {
+    _visualNavigator.milestoneStatusListener =
+        MilestoneStatusListener((Milestone milestone, MilestoneStatus milestoneStatus) {
       // Handle results from onMilestoneStatusUpdated().
       if (milestone.waypointIndex != null && milestoneStatus == MilestoneStatus.reached) {
         print("A user-defined waypoint was reached, index of waypoint: " + milestone.waypointIndex.toString());
@@ -339,7 +367,7 @@ class NavigationExample {
       // Handle results from onRouteDeviation().
       HERE.Route? route = _visualNavigator.route;
       if (route == null) {
-        // May happen in rare cases when route was set to null inbetween.
+        // May happen in rare cases when route was set to null in between.
         return;
       }
 
@@ -363,6 +391,17 @@ class NavigationExample {
 
       int distanceInMeters = currentGeoCoordinates.distanceTo(lastGeoCoordinatesOnRoute) as int;
       print("RouteDeviation in meters is " + distanceInMeters.toString());
+
+      // Now, an application needs to decide if the user has deviated far enough and
+      // what should happen next: For example, you can notify the user or simply try to
+      // calculate a new route. When you calculate a new route, you can, for example,
+      // take the current location as new start and keep the destination - another
+      // option could be to calculate a new route back to the lastMapMatchedLocationOnRoute.
+      // At least, make sure to not calculate a new route every time you get a RouteDeviation
+      // event as the route calculation happens asynchronously and takes also some time to
+      // complete.
+      // The deviation event is sent any time an off-route location is detected: It may make
+      // sense to await around 3 events before deciding on possible actions.
     });
 
     // Notifies on voice maneuver messages.
@@ -462,7 +501,25 @@ class NavigationExample {
       }
     });
 
-    // Notifies truck drivers on road restrictions ahead.
+    RoadSignWarningOptions roadSignWarningOptions = new RoadSignWarningOptions();
+    // Set a filter to get only shields relevant for TRUCKS and HEAVY_TRUCKS.
+    roadSignWarningOptions.vehicleTypesFilter = [RoadSignVehicleType.trucks, RoadSignVehicleType.heavyTrucks];
+    _visualNavigator.roadSignWarningOptions = roadSignWarningOptions;
+
+    // Notifies on road shields as they appear along the road.
+    _visualNavigator.roadSignWarningListener = RoadSignWarningListener((RoadSignWarning roadSignWarning) {
+      print("Road sign distance (m): ${roadSignWarning.distanceToRoadSignInMeters}");
+      print("Road sign type: ${roadSignWarning.type.name}");
+
+      if (roadSignWarning.signValue != null) {
+        // Optional text as it is printed on the local road sign.
+        print("Road sign text: ${roadSignWarning.signValue!.text}");
+      }
+
+      // For more road sign attributes, please check the API Reference.
+    });
+
+    // Notifies truck drivers on road restrictions ahead. Called whenever there is a change.
     // For example, there can be a bridge ahead not high enough to pass a big truck
     // or there can be a road ahead where the weight of the truck is beyond it's permissible weight.
     // This event notifies on truck restrictions in general,
@@ -474,24 +531,28 @@ class NavigationExample {
       for (TruckRestrictionWarning truckRestrictionWarning in list) {
         if (truckRestrictionWarning.distanceType == DistanceType.ahead) {
           print("TruckRestrictionWarning ahead in: ${truckRestrictionWarning.distanceInMeters} meters.");
+        } else if (truckRestrictionWarning.distanceType == DistanceType.reached) {
+          print("A restriction has been reached.");
         } else if (truckRestrictionWarning.distanceType == DistanceType.passed) {
+          // If not preceded by a "reached"-notification, this restriction was valid only for the passed location.
           print("A restriction just passed.");
         }
+
         // One of the following restrictions applies ahead, if more restrictions apply at the same time,
         // they are part of another TruckRestrictionWarning element contained in the list.
         if (truckRestrictionWarning.weightRestriction != null) {
-          // For now only one weight type (= truck) is exposed.
           WeightRestrictionType type = truckRestrictionWarning.weightRestriction!.type;
           int value = truckRestrictionWarning.weightRestriction!.valueInKilograms;
           print("TruckRestriction for weight (kg): ${type.toString()}: $value");
-        }
-        if (truckRestrictionWarning.dimensionRestriction != null) {
+        } else if (truckRestrictionWarning.dimensionRestriction != null) {
           // Can be either a length, width or height restriction of the truck. For example, a height
           // restriction can apply for a tunnel. Other possible restrictions are delivered in
           // separate TruckRestrictionWarning objects contained in the list, if any.
           DimensionRestrictionType type = truckRestrictionWarning.dimensionRestriction!.type;
           int value = truckRestrictionWarning.dimensionRestriction!.valueInCentimeters;
           print("TruckRestriction for dimension: ${type.toString()}: $value");
+        } else {
+          print("TruckRestriction: General restriction - no trucks allowed.");
         }
       }
     });
@@ -500,6 +561,47 @@ class NavigationExample {
     // from the previous one. This can be useful during tracking mode, when no maneuver information is provided.
     _visualNavigator.roadTextsListener = RoadTextsListener((RoadTexts roadTexts) {
       // See _getRoadName() how to get the current road name from the provided RoadTexts.
+    });
+
+    // Notifies on signposts together with complex junction views.
+    // Signposts are shown as they appear along a road on a shield to indicate the upcoming directions and
+    // destinations, such as cities or road names.
+    // Junction views appear as a 3D visualization (as a static image) to help the driver to orientate.
+    //
+    // Optionally, you can use a feature-configuration to preload the assets as part of a Region.
+    //
+    // The event matches the notification for complex junctions, see JunctionViewLaneAssistance.
+    // Note that the SVG data for junction view is composed out of several 3D elements,
+    // a horizon and the actual junction geometry.
+    _visualNavigator.realisticViewWarningListener =
+        RealisticViewWarningListener((RealisticViewWarning realisticViewWarning) {
+      double distance = realisticViewWarning.distanceToRealisticViewInMeters;
+      DistanceType distanceType = realisticViewWarning.distanceType;
+
+      // Note that DistanceType.reached is not used for Signposts and junction views
+      // as a junction is identified through a location instead of an area.
+      if (distanceType == DistanceType.ahead) {
+        print("A RealisticView ahead in: " + distance.toString() + " meters.");
+      } else if (distanceType == DistanceType.passed) {
+        print("A RealisticView just passed.");
+      }
+
+      RealisticView? realisticView = realisticViewWarning.realisticView;
+      if (realisticView == null) {
+        print("A RealisticView just passed. No SVG content delivered.");
+        return;
+      }
+
+      String signpostSvgImageContent = realisticView.signpostSvgImageContent;
+      String junctionViewSvgImageContent = realisticView.junctionViewSvgImageContent;
+      // The resolution-independent SVG data can now be used in an application to visualize the image.
+      // Use a SVG library of your choice to create an SVG image out of the SVG string.
+      // Both SVGs contain the same dimension and the signpostSvgImageContent should be shown on top of
+      // the junctionViewSvgImageContent.
+      // The images can be quite detailed, therefore it is recommended to show them on a secondary display
+      // in full size.
+      print("signpostSvgImage: " + signpostSvgImageContent);
+      print("junctionViewSvgImage: " + junctionViewSvgImageContent);
     });
   }
 
@@ -530,8 +632,8 @@ class NavigationExample {
     }
   }
 
-  void setupSpeedWarnings() {
-    SpeedLimitOffset speedLimitOffset = SpeedLimitOffset.withDefaults();
+  void _setupSpeedWarnings() {
+    SpeedLimitOffset speedLimitOffset = SpeedLimitOffset();
     speedLimitOffset.lowSpeedOffsetInMetersPerSecond = 2;
     speedLimitOffset.highSpeedOffsetInMetersPerSecond = 4;
     speedLimitOffset.highSpeedBoundaryInMetersPerSecond = 25;
@@ -539,12 +641,19 @@ class NavigationExample {
     _visualNavigator.speedWarningOptions = SpeedWarningOptions(speedLimitOffset);
   }
 
-  void setupVoiceTextMessages() {
+  void _setupVoiceTextMessages() {
     LanguageCode ttsLanguageCode =
         getLanguageCodeForDevice(VisualNavigator.getAvailableLanguagesForManeuverNotifications());
     _visualNavigator.maneuverNotificationOptions = ManeuverNotificationOptions(ttsLanguageCode, UnitSystem.metric);
 
     print("LanguageCode for maneuver notifications: $ttsLanguageCode.");
+  }
+
+  void _setupRealisticViewWarnings() {
+    RealisticViewWarningOptions realisticViewWarningOptions = RealisticViewWarningOptions();
+    realisticViewWarningOptions.aspectRatio = AspectRatio.aspectRatio3X4;
+    realisticViewWarningOptions.darkTheme = false;
+    _visualNavigator.realisticViewWarningOptions = realisticViewWarningOptions;
   }
 
   LanguageCode getLanguageCodeForDevice(List<LanguageCode> supportedVoiceSkins) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@
 package com.here.navigationcustom;
 
 import static com.here.sdk.mapview.LocationIndicator.IndicatorStyle;
-import static com.here.sdk.mapview.MapCamera.FlyToOptions;
 
+import android.content.Context;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -34,35 +34,48 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.here.navigationcustom.PermissionsRequestor.ResultListener;
 import com.here.sdk.animation.AnimationListener;
 import com.here.sdk.animation.AnimationState;
+import com.here.sdk.core.Color;
 import com.here.sdk.core.GeoCoordinates;
+import com.here.sdk.core.GeoCoordinatesUpdate;
 import com.here.sdk.core.GeoOrientationUpdate;
 import com.here.sdk.core.Location;
 import com.here.sdk.core.LocationListener;
+import com.here.sdk.core.engine.SDKNativeEngine;
+import com.here.sdk.core.engine.SDKOptions;
 import com.here.sdk.core.errors.InstantiationErrorException;
 import com.here.sdk.mapview.LocationIndicator;
+import com.here.sdk.mapview.MapCameraAnimation;
+import com.here.sdk.mapview.MapCameraAnimationFactory;
 import com.here.sdk.mapview.MapError;
+import com.here.sdk.mapview.MapFeatureModes;
+import com.here.sdk.mapview.MapFeatures;
 import com.here.sdk.mapview.MapMarker3DModel;
+import com.here.sdk.mapview.MapMeasure;
 import com.here.sdk.mapview.MapScene;
 import com.here.sdk.mapview.MapScheme;
 import com.here.sdk.mapview.MapView;
-import com.here.sdk.mapview.VisibilityState;
-import com.here.sdk.navigation.CameraSettings;
+import com.here.sdk.navigation.FixedCameraBehavior;
 import com.here.sdk.navigation.LocationSimulator;
 import com.here.sdk.navigation.LocationSimulatorOptions;
+import com.here.sdk.navigation.RouteProgressColors;
 import com.here.sdk.navigation.VisualNavigator;
+import com.here.sdk.navigation.VisualNavigatorColors;
 import com.here.sdk.routing.CarOptions;
 import com.here.sdk.routing.Route;
 import com.here.sdk.routing.RoutingEngine;
+import com.here.sdk.routing.SectionTransportMode;
 import com.here.sdk.routing.Waypoint;
+import com.here.time.Duration;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = MainActivity.class.getSimpleName();
-    private static final GeoCoordinates ROUTE_START_GEO_COORDINATES = new GeoCoordinates(52.520798, 13.409408);
     private static final double DISTANCE_IN_METERS = 1000;
 
     private PermissionsRequestor permissionsRequestor;
@@ -73,12 +86,17 @@ public class MainActivity extends AppCompatActivity {
     private LocationIndicator defaultLocationIndicator;
     private LocationIndicator customLocationIndicator;
     private Location lastKnownLocation = null;
+    private GeoCoordinates routeStartGeoCoordinates;
     private boolean isVisualNavigatorRenderingStarted = false;
     private boolean isDefaultLocationIndicator = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Usually, you need to initialize the HERE SDK only once during the lifetime of an application.
+        initializeHERESDK();
+
         setContentView(R.layout.activity_main);
 
         // Get a MapView instance from the layout.
@@ -89,6 +107,19 @@ public class MainActivity extends AppCompatActivity {
 
         showDialog("Custom Navigation",
                 "Start / stop simulated route guidance. Toggle between custom / default LocationIndicator.");
+    }
+
+    private void initializeHERESDK() {
+        // Set your credentials for the HERE SDK.
+        String accessKeyID = "YOUR_ACCESS_KEY_ID";
+        String accessKeySecret = "YOUR_ACCESS_KEY_SECRET";
+        SDKOptions options = new SDKOptions(accessKeyID, accessKeySecret);
+        try {
+            Context context = this;
+            SDKNativeEngine.makeSharedInstance(context, options);
+        } catch (InstantiationErrorException e) {
+            throw new RuntimeException("Initialization of HERE SDK failed: " + e.error.name());
+        }
     }
 
     private void handleAndroidPermissions() {
@@ -114,13 +145,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadMapScene() {
+        routeStartGeoCoordinates = new GeoCoordinates(52.520798, 13.409408);
+
         // Load a scene from the HERE SDK to render the map with a map scheme.
         mapView.getMapScene().loadScene(MapScheme.NORMAL_DAY, new MapScene.LoadSceneCallback() {
             @Override
             public void onLoadScene(@Nullable MapError mapError) {
                 if (mapError == null) {
+                    MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, DISTANCE_IN_METERS);
                     mapView.getCamera().lookAt(
-                            ROUTE_START_GEO_COORDINATES, DISTANCE_IN_METERS);
+                            routeStartGeoCoordinates, mapMeasureZoom);
                     startAppLogic();
                 } else {
                     Log.d(TAG, "Loading map failed: mapError: " + mapError.name());
@@ -143,10 +177,12 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // Enable a few map layers that might be useful to see for drivers.
-        mapView.getMapScene().setLayerVisibility(MapScene.Layers.TRAFFIC_FLOW, VisibilityState.VISIBLE);
-        mapView.getMapScene().setLayerVisibility(MapScene.Layers.TRAFFIC_INCIDENTS, VisibilityState.VISIBLE);
-        mapView.getMapScene().setLayerVisibility(MapScene.Layers.SAFETY_CAMERAS, VisibilityState.VISIBLE);
-        mapView.getMapScene().setLayerVisibility(MapScene.Layers.VEHICLE_RESTRICTIONS, VisibilityState.VISIBLE);
+        Map<String, String> mapFeatures = new HashMap<>();
+        mapFeatures.put(MapFeatures.TRAFFIC_FLOW, MapFeatureModes.TRAFFIC_FLOW_WITH_FREE_FLOW);
+        mapFeatures.put(MapFeatures.TRAFFIC_INCIDENTS, MapFeatureModes.DEFAULT);
+        mapFeatures.put(MapFeatures.SAFETY_CAMERAS, MapFeatureModes.DEFAULT);
+        mapFeatures.put(MapFeatures.VEHICLE_RESTRICTIONS, MapFeatureModes.DEFAULT);
+        mapView.getMapScene().enableFeatures(mapFeatures);
 
         defaultLocationIndicator = new LocationIndicator();
         customLocationIndicator = createCustomLocationIndicator();
@@ -180,7 +216,11 @@ public class MainActivity extends AppCompatActivity {
 
     // Calculate a fixed route for testing and start guidance simulation along the route.
     public void startButtonClicked(View view) {
-        Waypoint startWaypoint = new Waypoint(ROUTE_START_GEO_COORDINATES);
+        if (isVisualNavigatorRenderingStarted) {
+            return;
+        }
+
+        Waypoint startWaypoint = new Waypoint(routeStartGeoCoordinates);
         Waypoint destinationWaypoint = new Waypoint(new GeoCoordinates(52.530905, 13.385007));
         routingEngine.calculateRoute(
                 new ArrayList<>(Arrays.asList(startWaypoint, destinationWaypoint)),
@@ -200,7 +240,7 @@ public class MainActivity extends AppCompatActivity {
         stopGuidance();
     }
 
-    // Toogle between the default LocationIndicator and custom LocationIndicator.
+    // Toggle between the default LocationIndicator and custom LocationIndicator.
     // The default LocationIndicator uses a 3D asset that is part of the HERE SDK.
     // The custom LocationIndicator uses different 3D assets, see asset folder.
     public void toggleButtonClicked(View view) {
@@ -244,7 +284,7 @@ public class MainActivity extends AppCompatActivity {
             visualNavigator.setCustomLocationIndicator(customLocationIndicator);
 
             // Note that the type of the LocationIndicator is taken from the route's TransportMode.
-            // It cannot be overriden during guidance.
+            // It cannot be overridden during guidance.
             // During tracking mode (not shown in this app) you can specify the marker type via:
             // visualNavigator.setTrackingTransportMode(TransportMode.PEDESTRIAN);
         }
@@ -258,53 +298,66 @@ public class MainActivity extends AppCompatActivity {
             // including a bearing direction.
             // For testing purposes, we create below a Location object. Usually, you want to get this from
             // a GPS sensor instead. Check the Positioning example app for this.
-            return new Location.Builder()
-                    .setCoordinates(ROUTE_START_GEO_COORDINATES)
-                    .setTimestamp(new Date())
-                    .setBearingInDegrees(0.0)
-                    .build();
+            Location location = new Location(routeStartGeoCoordinates);
+            location.time = new Date();
+            location.bearingInDegrees = 0.0;
+            return location;
         }
 
         // This location is taken from the LocationSimulator that provides locations along the route.
         return lastKnownLocation;
     }
 
+    // Animate to custom guidance perspective, centered on start location of route.
     private void animateToRouteStart(Route route) {
-        // Animate to custom guidance perspective, centered on start location of route.
+        // The first coordinate marks the start location of the route.
+        GeoCoordinates startOfRoute = route.getGeometry().vertices.get(0);
+        GeoCoordinatesUpdate geoCoordinatesUpdate = new GeoCoordinatesUpdate(startOfRoute);
+
         Double bearingInDegrees = null;
         double tiltInDegrees = 70;
-        mapView.getCamera().flyTo(
-                // The first coordinate marks the start location of the route.
-                route.getGeometry().vertices.get(0),
-                new GeoOrientationUpdate(bearingInDegrees, tiltInDegrees),
-                50,
-                new FlyToOptions(),
-                new AnimationListener() {
-                    @Override
-                    public void onAnimationStateChanged(@NonNull AnimationState animationState) {
-                        if (animationState == AnimationState.COMPLETED
-                            || animationState == AnimationState.CANCELLED) {
-                                startGuidance(route);
-                        }
-                    }
-                });
+        GeoOrientationUpdate orientationUpdate = new GeoOrientationUpdate(bearingInDegrees, tiltInDegrees);
+
+        double distanceInMeters = 50;
+        MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, distanceInMeters);
+
+        double bowFactor = 1;
+        MapCameraAnimation animation = MapCameraAnimationFactory.flyTo(
+                geoCoordinatesUpdate, orientationUpdate, mapMeasureZoom, bowFactor, Duration.ofSeconds(3));
+        mapView.getCamera().startAnimation(animation, new AnimationListener() {
+            @Override
+            public void onAnimationStateChanged(@NonNull AnimationState animationState) {
+                if (animationState == AnimationState.COMPLETED
+                        || animationState == AnimationState.CANCELLED) {
+                    startGuidance(route);
+                }
+            }
+        });
     }
 
     private void animateToDefaultMapPerspective() {
+        GeoCoordinates targetLocation = mapView.getCamera().getState().targetCoordinates;
+        GeoCoordinatesUpdate geoCoordinatesUpdate = new GeoCoordinatesUpdate(targetLocation);
+
         // By setting null we keep the current bearing rotation of the map.
         Double bearingInDegrees = null;
         double tiltInDegrees = 0;
-        mapView.getCamera().flyTo(
-                mapView.getCamera().getState().targetCoordinates,
-                new GeoOrientationUpdate(bearingInDegrees, tiltInDegrees),
-                DISTANCE_IN_METERS,
-                new FlyToOptions());
+        GeoOrientationUpdate orientationUpdate = new GeoOrientationUpdate(bearingInDegrees, tiltInDegrees);
+
+        MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, DISTANCE_IN_METERS);
+        double bowFactor = 1;
+        MapCameraAnimation animation = MapCameraAnimationFactory.flyTo(
+                geoCoordinatesUpdate, orientationUpdate, mapMeasureZoom, bowFactor, Duration.ofSeconds(3));
+        mapView.getCamera().startAnimation(animation);
     }
 
     private void startGuidance(Route route) {
         if (isVisualNavigatorRenderingStarted) {
             return;
         }
+
+        // Set the route and maneuver arrow color.
+        customizeVisualNavigatorColors();
 
         // Set custom guidance perspective.
         customizeGuidanceView();
@@ -339,20 +392,43 @@ public class MainActivity extends AppCompatActivity {
         animateToDefaultMapPerspective();
     }
 
-    private void customizeGuidanceView() {
-        CameraSettings cameraSettings = new CameraSettings();
-        // Set custom zoom level and tilt.
-        cameraSettings.cameraDistanceInMeters = 50; // Defaults to 150.
-        cameraSettings.cameraTiltInDegrees = 70; // Defaults to 50.
-        // Disable North-Up mode by setting null. Enable North-up mode by setting Double.valueOf(0).
-        // By default, North-Up mode is disabled.
-        cameraSettings.cameraBearingInDegrees = null;
+    private void customizeVisualNavigatorColors() {
+        Color routeAheadColor =  Color.valueOf(android.graphics.Color.BLUE);
+        Color routeBehindColor = Color.valueOf(android.graphics.Color.RED);
+        Color routeAheadOutlineColor = Color.valueOf(android.graphics.Color.YELLOW);
+        Color routeBehindOutlineColor = Color.valueOf(android.graphics.Color.DKGRAY);
+        Color maneuverArrowColor = Color.valueOf(android.graphics.Color.GREEN);
 
-        // The CameraSettings can be updated during guidance at any time as often as desired.
-        visualNavigator.setCameraSettings(cameraSettings);
+        VisualNavigatorColors visualNavigatorColors = VisualNavigatorColors.dayColors();
+        RouteProgressColors routeProgressColors = new RouteProgressColors(
+                routeAheadColor,
+                routeBehindColor,
+                routeAheadOutlineColor,
+                routeBehindOutlineColor);
+
+        // Sets the color used to draw maneuver arrows.
+        visualNavigatorColors.setManeuverArrowColor(maneuverArrowColor);
+        // Sets route color for a single transport mode. Other modes are kept using defaults.
+        visualNavigatorColors.setRouteProgressColors(SectionTransportMode.CAR, routeProgressColors);
+        // Sets the adjusted colors for route progress and maneuver arrows based on the day color scheme.
+        visualNavigator.setColors(visualNavigatorColors);
     }
 
-    private final LocationListener myLlocationListener = new LocationListener() {
+    private void customizeGuidanceView() {
+        FixedCameraBehavior cameraBehavior = new FixedCameraBehavior();
+        // Set custom zoom level and tilt.
+        cameraBehavior.setCameraDistanceInMeters(50); // Defaults to 150.
+        cameraBehavior.setCameraTiltInDegrees(70); // Defaults to 50.
+        // Disable North-Up mode by setting null. Enable North-up mode by setting Double.valueOf(0).
+        // By default, North-Up mode is disabled.
+        cameraBehavior.setCameraBearingInDegrees(null);
+
+        // The CameraBehavior can be updated during guidance at any time as often as desired.
+        // Alternatively, use DynamicCameraBehavior for auto-zoom.
+        visualNavigator.setCameraBehavior(cameraBehavior);
+    }
+
+    private final LocationListener myLocationListener = new LocationListener() {
         @Override
         public void onLocationUpdated(@NonNull Location location) {
             // Feed location data into the VisualNavigator.
@@ -374,28 +450,48 @@ public class MainActivity extends AppCompatActivity {
             throw new RuntimeException("Initialization of LocationSimulator failed: " + e.error.name());
         }
 
-        locationSimulator.setListener(myLlocationListener);
+        locationSimulator.setListener(myLocationListener);
         locationSimulator.start();
     }
 
     @Override
     protected void onPause() {
-        super.onPause();
         mapView.onPause();
+        super.onPause();
     }
 
     @Override
     protected void onResume() {
-        super.onResume();
         mapView.onResume();
+        super.onResume();
     }
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
         visualNavigator.stopRendering();
         locationSimulator.stop();
         mapView.onDestroy();
+        disposeHERESDK();
+        super.onDestroy();
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        mapView.onSaveInstanceState(outState);
+        super.onSaveInstanceState(outState);
+    }
+
+    private void disposeHERESDK() {
+        // Free HERE SDK resources before the application shuts down.
+        // Usually, this should be called only on application termination.
+        // Afterwards, the HERE SDK is no longer usable unless it is initialized again.
+        SDKNativeEngine sdkNativeEngine = SDKNativeEngine.getSharedInstance();
+        if (sdkNativeEngine != null) {
+            sdkNativeEngine.dispose();
+            // For safety reasons, we explicitly set the shared instance to null to avoid situations,
+            // where a disposed instance is accidentally reused.
+            SDKNativeEngine.setSharedInstance(null);
+        }
     }
 
     private void showDialog(String title, String message) {

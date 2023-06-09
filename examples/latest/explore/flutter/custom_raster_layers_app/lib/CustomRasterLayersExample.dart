@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@
  * License-Filename: LICENSE
  */
 
+import 'dart:typed_data';
+import 'package:flutter/services.dart';
 import 'package:here_sdk/core.dart';
 import 'package:here_sdk/mapview.dart';
 import 'package:here_sdk/mapview.datasource.dart';
@@ -25,10 +27,12 @@ class CustomRasterLayersExample {
   HereMapController _hereMapController;
   MapLayer? _rasterMapLayerTonerStyle;
   RasterDataSource? _rasterDataSourceTonerStyle;
+  MapImage? _poiMapImage;
 
   CustomRasterLayersExample(HereMapController this._hereMapController) {
-    double distanceToEarthInMeters = 60000;
-    _hereMapController.camera.lookAtPointWithDistance(GeoCoordinates(52.530932, 13.384915), distanceToEarthInMeters);
+    double distanceToEarthInMeters = 60 * 1000;
+    MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
+    _hereMapController.camera.lookAtPointWithMeasure(GeoCoordinates(52.530932, 13.384915), mapMeasureZoom);
 
     String dataSourceName = "myRasterDataSourceTonerStyle";
     _rasterDataSourceTonerStyle = _createRasterDataSource(dataSourceName);
@@ -36,6 +40,13 @@ class CustomRasterLayersExample {
 
     // We want to start with the default map style.
     _rasterMapLayerTonerStyle?.setEnabled(false);
+
+    // Add a POI marker
+    _addPOIMapMarker(GeoCoordinates(52.530932, 13.384915), 1);
+
+    // Users of the Navigate Edition can set the visibility for all the POI categories to hidden.
+    // List<String> categoryIds = [];
+    // MapScene.setPoiVisibility(categoryIds, VisibilityState.hidden);
   }
 
   void enableButtonClicked() {
@@ -58,9 +69,12 @@ class CustomRasterLayersExample {
     RasterDataSourceProviderConfiguration rasterProviderConfig =
         RasterDataSourceProviderConfiguration.withDefaults(templateUrl, TilingScheme.quadTreeMercator, storageLevels);
 
+    // If you want to add transparent layers then set this to true.
+    rasterProviderConfig.hasAlphaChannel = false;
+
     // Raster tiles are stored in a separate cache on the device.
     String path = "cache/raster/toner";
-    int maxDiskSizeInBytes = 1024 * 1024 * 32;
+    int maxDiskSizeInBytes = 1024 * 1024 * 128; // 128 MB
     RasterDataSourceCacheConfiguration cacheConfig = RasterDataSourceCacheConfiguration(path, maxDiskSizeInBytes);
 
     // Note that this will make the raster source already known to the passed map view.
@@ -92,5 +106,28 @@ class CustomRasterLayersExample {
   void onDestroy() {
     _rasterMapLayerTonerStyle?.destroy();
     _rasterDataSourceTonerStyle?.destroy();
+  }
+
+  Future<void> _addPOIMapMarker(GeoCoordinates geoCoordinates, int drawOrder) async {
+    // Reuse existing MapImage for new map markers.
+    if (_poiMapImage == null) {
+      Uint8List imagePixelData = await _loadFileAsUint8List('assets/poi.png');
+      _poiMapImage = MapImage.withPixelDataAndImageFormat(imagePixelData, ImageFormat.png);
+    }
+
+    // By default, the anchor point is set to 0.5, 0.5 (= centered).
+    // Here the bottom, middle position should point to the location.
+    Anchor2D anchor2D = Anchor2D.withHorizontalAndVertical(0.5, 1);
+
+    MapMarker mapMarker = MapMarker.withAnchor(geoCoordinates, _poiMapImage!, anchor2D);
+    mapMarker.drawOrder = drawOrder;
+
+    _hereMapController.mapScene.addMapMarker(mapMarker);
+  }
+
+  Future<Uint8List> _loadFileAsUint8List(String assetPathToFile) async {
+    // The path refers to the assets directory as specified in pubspec.yaml.
+    ByteData fileData = await rootBundle.load(assetPathToFile);
+    return Uint8List.view(fileData.buffer);
   }
 }

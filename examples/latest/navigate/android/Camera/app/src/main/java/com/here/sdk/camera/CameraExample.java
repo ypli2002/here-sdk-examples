@@ -1,5 +1,5 @@
  /*
-  * Copyright (C) 2019-2022 HERE Europe B.V.
+  * Copyright (C) 2019-2023 HERE Europe B.V.
   *
   * Licensed under the Apache License, Version 2.0 (the "License");
   * you may not use this file except in compliance with the License.
@@ -21,21 +21,28 @@
 
  import android.app.Activity;
  import android.content.Context;
- import androidx.appcompat.app.AlertDialog.Builder;
  import android.util.Log;
  import android.widget.ImageView;
  import android.widget.Toast;
 
+ import androidx.annotation.NonNull;
+ import androidx.appcompat.app.AlertDialog.Builder;
+
  import com.here.sdk.core.Color;
  import com.here.sdk.core.GeoCircle;
  import com.here.sdk.core.GeoCoordinates;
+ import com.here.sdk.core.GeoCoordinatesUpdate;
  import com.here.sdk.core.GeoOrientationUpdate;
  import com.here.sdk.core.GeoPolygon;
  import com.here.sdk.core.Point2D;
  import com.here.sdk.mapview.MapCamera;
- import com.here.sdk.mapview.MapCameraObserver;
+ import com.here.sdk.mapview.MapCameraAnimation;
+ import com.here.sdk.mapview.MapCameraAnimationFactory;
+ import com.here.sdk.mapview.MapCameraListener;
+ import com.here.sdk.mapview.MapMeasure;
  import com.here.sdk.mapview.MapPolygon;
  import com.here.sdk.mapview.MapView;
+ import com.here.time.Duration;
 
  /**
   * This example shows how to use the Camera class to rotate and tilt the map programmatically, to set
@@ -57,7 +64,9 @@
          this.mapView = mapView;
 
          camera = mapView.getCamera();
-         camera.lookAt(new GeoCoordinates(52.750731,13.007375), DEFAULT_DISTANCE_TO_EARTH_IN_METERS);
+
+         MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, DEFAULT_DISTANCE_TO_EARTH_IN_METERS);
+         camera.lookAt(new GeoCoordinates(52.750731,13.007375), mapMeasureZoom);
 
          // The red circle dot indicates the camera's current target location.
          // By default, the dot is centered on the full screen map view.
@@ -85,7 +94,15 @@
      public void moveToXYButtonClicked() {
          GeoCoordinates geoCoordinates = getRandomGeoCoordinates();
          updatePoiCircle(geoCoordinates);
-         camera.flyTo(geoCoordinates);
+         flyTo(geoCoordinates);
+     }
+
+     private void flyTo(GeoCoordinates geoCoordinates) {
+         GeoCoordinatesUpdate geoCoordinatesUpdate = new GeoCoordinatesUpdate(geoCoordinates);
+         double bowFactor = 1;
+         MapCameraAnimation animation =
+                 MapCameraAnimationFactory.flyTo(geoCoordinatesUpdate, bowFactor, Duration.ofSeconds(3));
+         camera.startAnimation(animation);
      }
 
      // Rotate the map by x degrees. Tip: Try to see what happens for negative values.
@@ -150,17 +167,17 @@
          return mapPolygon;
      }
 
-     private final MapCameraObserver cameraObserver = new MapCameraObserver() {
+     private final MapCameraListener cameraListener = new MapCameraListener() {
          @Override
-         public void onCameraUpdated(MapCamera.State state) {
+         public void onMapCameraUpdated(@NonNull MapCamera.State state) {
              GeoCoordinates camTarget = state.targetCoordinates;
-             Log.d("CameraObserver", "New camera target: " +
+             Log.d("CameraListener", "New camera target: " +
                      camTarget.latitude + ", " + camTarget.longitude);
          }
      };
 
      private void addCameraObserver() {
-         mapView.getCamera().addObserver(cameraObserver);
+         mapView.getCamera().addListener(cameraListener);
      }
 
      private GeoCoordinates getRandomGeoCoordinates() {

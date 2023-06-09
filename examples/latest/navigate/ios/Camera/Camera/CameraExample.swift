@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ import UIKit
 // This example shows how to use the Camera class to rotate and tilt the map programmatically, to set
 // a new transform center that influences those operations, and to move to a new location.
 // For more features of the Camera class, please consult the API Reference and the Developer's Guide.
-class CameraExample: TapDelegate, MapCameraObserver {
+class CameraExample: TapDelegate, MapCameraDelegate {
 
     private let defaultDistanceToEarthInMeters: Double = 8000
     private let viewController: UIViewController
@@ -37,8 +37,9 @@ class CameraExample: TapDelegate, MapCameraObserver {
         self.mapView = mapView
 
         camera = mapView.camera
+        let distanceInMeters = MapMeasure(kind: .distance, value: defaultDistanceToEarthInMeters)
         camera.lookAt(point: GeoCoordinates(latitude: 52.750731,longitude: 13.007375),
-                      distanceInMeters: defaultDistanceToEarthInMeters)
+                      zoom: distanceInMeters)
 
         // The red circle dot indicates the camera's current target location.
         // By default, the dot is centered on the map view.
@@ -53,7 +54,7 @@ class CameraExample: TapDelegate, MapCameraObserver {
         updatePoiCircle(getRandomGeoCoordinates())
 
         mapView.gestures.tapDelegate = self
-        mapView.camera.addObserver(self)
+        mapView.camera.addDelegate(self)
 
         showDialog(title: "Note", message: "Tap the map to set a new transform center.")
     }
@@ -69,9 +70,18 @@ class CameraExample: TapDelegate, MapCameraObserver {
     func onMoveToXYButtonClicked() {
         let geoCoordinates = getRandomGeoCoordinates()
         updatePoiCircle(geoCoordinates)
-        camera.flyTo(target: geoCoordinates)
+        flyTo(target: geoCoordinates)
     }
 
+    private func flyTo(target: GeoCoordinates) {
+        let geoCoordinatesUpdate = GeoCoordinatesUpdate(target)
+        let durationInSeconds: TimeInterval = 3
+        let animation = MapCameraAnimationFactory.flyTo(target: geoCoordinatesUpdate,
+                                                        bowFactor: 1,
+                                                        duration: durationInSeconds)
+        mapView.camera.startAnimation(animation)
+    }
+    
     // Rotate the map by x degrees. Tip: Try to see what happens for negative values.
     private func rotateMap(bearingStepInDegrees: Double) {
         let currentBearing = camera.state.orientationAtTarget.bearing
@@ -99,8 +109,8 @@ class CameraExample: TapDelegate, MapCameraObserver {
         setTransformCenter(mapViewTouchPointInPixels: origin)
     }
 
-    // Conform to the MapCameraObserver protocol.
-    func onCameraUpdated(_ cameraState: heresdk.MapCamera.State) {
+    // Conform to the MapCameraDelegate protocol.
+    func onMapCameraUpdated(_ cameraState: heresdk.MapCamera.State) {
         print("New camera target \(cameraState.targetCoordinates.latitude), \(cameraState.targetCoordinates.longitude)")
     }
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ import com.here.sdk.mapview.MapCamera;
 import com.here.sdk.mapview.MapImage;
 import com.here.sdk.mapview.MapImageFactory;
 import com.here.sdk.mapview.MapMarker;
+import com.here.sdk.mapview.MapMeasure;
 import com.here.sdk.mapview.MapPolyline;
 import com.here.sdk.mapview.MapView;
 import com.here.sdk.routing.CalculateRouteCallback;
@@ -68,7 +69,8 @@ public class PublicTransportRoutingExample {
         this.mapView = mapView;
         MapCamera camera = mapView.getCamera();
         double distanceInMeters = 1000 * 10;
-        camera.lookAt(new GeoCoordinates(52.520798, 13.409408), distanceInMeters);
+        MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, distanceInMeters);
+        camera.lookAt(new GeoCoordinates(52.520798, 13.409408), mapMeasureZoom);
 
         try {
             transitRoutingEngine = new TransitRoutingEngine();

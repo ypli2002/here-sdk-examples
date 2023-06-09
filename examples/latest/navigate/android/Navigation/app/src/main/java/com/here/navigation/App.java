@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import android.content.Context;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AlertDialog;
+
 import com.here.sdk.core.Color;
 import com.here.sdk.core.GeoCoordinates;
 import com.here.sdk.core.GeoPolyline;
@@ -31,6 +32,7 @@ import com.here.sdk.gestures.GestureState;
 import com.here.sdk.mapview.MapImage;
 import com.here.sdk.mapview.MapImageFactory;
 import com.here.sdk.mapview.MapMarker;
+import com.here.sdk.mapview.MapMeasure;
 import com.here.sdk.mapview.MapPolyline;
 import com.here.sdk.mapview.MapView;
 import com.here.sdk.routing.Route;
@@ -53,7 +55,7 @@ public class App {
     private final List<MapPolyline> mapPolylines = new ArrayList<>();
     private Waypoint startWaypoint;
     private Waypoint destinationWaypoint;
-    private boolean isLongpressDestination;
+    private boolean setLongpressDestination;
     private final RouteCalculator routeCalculator;
     private final NavigationExample navigationExample;
     private final TextView messageView;
@@ -62,7 +64,8 @@ public class App {
         this.context = context;
         this.mapView = mapView;
         this.messageView = messageView;
-        this.mapView.getCamera().lookAt(DEFAULT_MAP_CENTER, DEFAULT_DISTANCE_IN_METERS);
+        MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, DEFAULT_DISTANCE_IN_METERS);
+        this.mapView.getCamera().lookAt(DEFAULT_MAP_CENTER, mapMeasureZoom);
 
         routeCalculator = new RouteCalculator();
 
@@ -71,7 +74,7 @@ public class App {
 
         setLongPressGestureHandler();
 
-        messageView.setText("Long press to set a destination or use a random one.");
+        messageView.setText("Long press to set start/destination or use random ones.");
     }
 
     // Calculate a route and start navigation using a location simulator.
@@ -90,7 +93,6 @@ public class App {
 
     public void clearMapButtonPressed() {
         clearMap();
-        isLongpressDestination = false;
     }
 
     public void toggleTrackingButtonOnClicked() {
@@ -123,13 +125,12 @@ public class App {
 
     private boolean determineRouteWaypoints(boolean isSimulated) {
         if (!isSimulated && navigationExample.getLastKnownLocation() == null) {
-            showDialog("Error", "No location found.");
+            showDialog("Error", "No GPS location found.");
             return false;
         }
 
-        if (isSimulated) {
-            startWaypoint = new Waypoint(getMapViewCenter());
-        } else {
+        // When using real GPS locations, we always start from the current location of user.
+        if (!isSimulated) {
             Location location = navigationExample.getLastKnownLocation();
             startWaypoint = new Waypoint(location.coordinates);
             // If a driver is moving, the bearing value can help to improve the route calculation.
@@ -137,13 +138,13 @@ public class App {
             mapView.getCamera().lookAt(location.coordinates);
         }
 
-        if (!isLongpressDestination) {
-            destinationWaypoint = new Waypoint(createRandomGeoCoordinatesAroundMapCenter());
+        if (startWaypoint == null) {
+            startWaypoint = new Waypoint(createRandomGeoCoordinatesAroundMapCenter());
         }
 
-        // Add circles to indicate start and destination of route.
-        addCircleMapMarker(startWaypoint.coordinates, R.drawable.green_dot);
-        addCircleMapMarker(destinationWaypoint.coordinates, R.drawable.green_dot);
+        if (destinationWaypoint == null) {
+            destinationWaypoint = new Waypoint(createRandomGeoCoordinatesAroundMapCenter());
+        }
 
         return true;
     }
@@ -212,12 +213,16 @@ public class App {
                 return;
             }
             if (gestureState == GestureState.BEGIN) {
-                clearWaypointMapMarker();
-                clearRoute();
-                destinationWaypoint = new Waypoint(geoCoordinates);
-                addCircleMapMarker(geoCoordinates, R.drawable.green_dot);
-                isLongpressDestination = true;
-                messageView.setText("New long press destination set.");
+                if (setLongpressDestination) {
+                    destinationWaypoint = new Waypoint(geoCoordinates);
+                    addCircleMapMarker(geoCoordinates, R.drawable.green_dot);
+                    messageView.setText("New long press destination set.");
+                } else {
+                    startWaypoint = new Waypoint(geoCoordinates);
+                    addCircleMapMarker(geoCoordinates, R.drawable.green_dot);
+                    messageView.setText("New long press starting point set.");
+                }
+                setLongpressDestination = !setLongpressDestination;
             }
         });
     }
@@ -265,7 +270,12 @@ public class App {
                .show();
     }
 
-    public void stopLocating() {
+    public void detach() {
+        // Disables TBT guidance (if running) and enters tracking mode.
+        navigationExample.stopNavigation();
+        // Disables positioning.
         navigationExample.stopLocating();
+        // Disables rendering.
+        navigationExample.stopRendering();
     }
 }

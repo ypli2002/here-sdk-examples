@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -75,9 +75,10 @@ class AppLogic {
     }
 
     double distanceToEarthInMeters = 10000;
-    _hereMapController.camera.lookAtPointWithDistance(
+    MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
+    _hereMapController.camera.lookAtPointWithMeasure(
       currentLocation.coordinates,
-      distanceToEarthInMeters,
+      mapMeasureZoom,
     );
 
     var startWaypoint = HERE.Waypoint.withDefaults(currentLocation.coordinates);

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,6 +58,14 @@ final class ViewController: UIViewController {
         offlineMapsExample.onSearchPlaceClicked()
     }
 
+    @IBAction func onSwitchOnlineClicked(_ sender: Any) {
+        offlineMapsExample.onSwitchOnlineClicked()
+    }
+
+    @IBAction func onSwitchOfflineClicked(_ sender: Any) {
+        offlineMapsExample.onSwitchOfflineClicked()
+    }
+    
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
         mapView.handleLowMemory()

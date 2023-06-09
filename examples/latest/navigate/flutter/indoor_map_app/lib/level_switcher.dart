@@ -107,10 +107,12 @@ class LevelSwitcherState extends State<LevelSwitcher> {
 
   // Create a list view item from the level.
   Widget _levelItemBuilder(BuildContext context, VenueLevel level) {
-    bool isSelectedLevel = level.id == _selectedLevel!.id;
-    return FlatButton(
-      color: isSelectedLevel ? Colors.blue : Colors.white,
-      padding: EdgeInsets.zero,
+    bool isSelectedLevel = level.identifier == _selectedLevel!.identifier;
+    return TextButton(
+      style: TextButton.styleFrom(
+          foregroundColor: isSelectedLevel ? Colors.blue : Colors.white,
+          padding: EdgeInsets.zero
+      ),
       child: Text(
         level.shortName,
         textAlign: TextAlign.center,

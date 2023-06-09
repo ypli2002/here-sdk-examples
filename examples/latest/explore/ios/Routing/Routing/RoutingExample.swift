@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,8 +34,9 @@ class RoutingExample {
         self.viewController = viewController
         self.mapView = mapView
         let camera = mapView.camera
+        let distanceInMeters = MapMeasure(kind: .distance, value: 1000 * 10)
         camera.lookAt(point: GeoCoordinates(latitude: 52.520798, longitude: 13.409408),
-                      distanceInMeters: 1000 * 10)
+                      zoom: distanceInMeters)
 
         do {
             try routingEngine = RoutingEngine()
@@ -77,15 +78,15 @@ class RoutingExample {
             }
         }
     }
-    
+
     private func logRouteSectionDetails(route: Route) {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "HH:mm"
-        
+
         for (i, sections) in route.sections.enumerated() {
             print("Route Section : " + String(i));
-            print("Route Section Departure Time : " + dateFormatter.string(from: sections.departureTime!));
-            print("Route Section Arrival Time : " + dateFormatter.string(from: sections.arrivalTime!));
+            print("Route Section Departure Time : " + dateFormatter.string(from: sections.departureLocationTime!.localTime));
+            print("Route Section Arrival Time : " + dateFormatter.string(from: sections.arrivalLocationTime!.localTime));
             print("Route Section length : " + "\(sections.lengthInMeters)" + " m");
             print("Route Section duration : " + "\(sections.duration)" + " s");
         }
@@ -93,9 +94,11 @@ class RoutingExample {
 
     private func showRouteDetails(route: Route) {
         let estimatedTravelTimeInSeconds = route.duration
+        let estimatedTrafficDelayInSeconds = route.trafficDelay
         let lengthInMeters = route.lengthInMeters
-        
-        let routeDetails = "Travel Time: " + formatTime(sec: estimatedTravelTimeInSeconds)
+
+        let routeDetails = "Travel Time (h:m): " + formatTime(sec: estimatedTravelTimeInSeconds)
+                         + ", Traffic Delay (h:m): " + formatTime(sec: estimatedTrafficDelayInSeconds)
                          + ", Length: " + formatLength(meters: lengthInMeters)
 
         showDialog(title: "Route Details", message: routeDetails)
@@ -118,7 +121,7 @@ class RoutingExample {
     private func showRouteOnMap(route: Route) {
         // Optionally, clear any previous route.
         clearMap()
-        
+
         // Show route as polyline.
         let routeGeoPolyline = route.geometry
         let routeMapPolyline = MapPolyline(geometry: routeGeoPolyline,
@@ -130,9 +133,12 @@ class RoutingExample {
         mapView.mapScene.addMapPolyline(routeMapPolyline)
         mapPolylineList.append(routeMapPolyline)
 
+        // Optionally, render traffic on route.
+        showTrafficOnRoute(route)
+
         let startPoint = route.sections.first!.departurePlace.mapMatchedCoordinates
         let destination = route.sections.last!.arrivalPlace.mapMatchedCoordinates
-        
+
         // Draw a circle to indicate starting point and destination.
         addCircleMapMarker(geoCoordinates: startPoint, imageName: "green_dot.png")
         addCircleMapMarker(geoCoordinates: destination, imageName: "green_dot.png")
@@ -191,6 +197,54 @@ class RoutingExample {
                                         self.addCircleMapMarker(geoCoordinates: waypoint1GeoCoordinates, imageName: "red_dot.png")
                                         self.addCircleMapMarker(geoCoordinates: waypoint2GeoCoordinates, imageName: "red_dot.png")
         }
+    }
+
+    // This renders the traffic jam factor on top of the route as multiple MapPolylines per span.
+    private func showTrafficOnRoute(_ route: Route) {
+        if route.lengthInMeters / 1000 > 5000 {
+          print("Skip showing traffic-on-route for longer routes.");
+          return
+        }
+
+        for section in route.sections {
+            for span in section.spans {
+                let trafficSpeed = span.trafficSpeed
+                guard let lineColor = getTrafficColor(trafficSpeed.jamFactor) else {
+                    // Skip rendering low traffic.
+                    continue
+                }
+                // A polyline needs to have two or more coordinates.
+                guard let spanGeoPolyline = try? GeoPolyline(vertices: span.polyline) else {
+                    print("Error: Initialization of GeoPolyline failed.")
+                    return
+                }
+                let trafficSpanMapPolyline = MapPolyline(geometry: spanGeoPolyline,
+                                                         widthInPixels: 10,
+                                                         color: lineColor)
+                mapView.mapScene.addMapPolyline(trafficSpanMapPolyline)
+                mapPolylineList.append(trafficSpanMapPolyline)
+        }
+      }
+    }
+
+    // Define a traffic color scheme based on the route's jam factor.
+    // 0 <= jamFactor < 4: No or light traffic.
+    // 4 <= jamFactor < 8: Moderate or slow traffic.
+    // 8 <= jamFactor < 10: Severe traffic.
+    // jamFactor = 10: No traffic, ie. the road is blocked.
+    // Returns nil in case of no or light traffic.
+    private func getTrafficColor(_ jamFactor: Double?) -> UIColor? {
+        guard let jamFactor = jamFactor else {
+            return nil
+        }
+        if jamFactor < 4 {
+            return nil
+        } else if jamFactor >= 4 && jamFactor < 8 {
+          return UIColor(red: 1, green: 1, blue: 0, alpha: 0.63) // Yellow
+        } else if jamFactor >= 8 && jamFactor < 10 {
+          return UIColor(red: 1, green: 0, blue: 0, alpha: 0.63) // Red
+        }
+        return UIColor(red: 0, green: 0, blue: 0, alpha: 0.63) // Black
     }
 
     func clearMap() {

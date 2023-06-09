@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,10 +45,10 @@ final class ViewController: UIViewController {
 
     private func searchForCategories() {
         let categoryList = [PlaceCategory(id: PlaceCategory.eatAndDrink),
-                            PlaceCategory(id: PlaceCategory.shoppingElectronics)]
-        let categoryQuery = CategoryQuery(categoryList,
-                                          areaCenter: GeoCoordinates(latitude: 52.520798,
-                                                                     longitude: 13.409408))
+                            PlaceCategory(id: PlaceCategory.shoppingElectronics)]        
+        let queryArea = CategoryQuery.Area(areaCenter: GeoCoordinates(latitude: 52.520798,
+                                                                      longitude: 13.409408))
+        let categoryQuery = CategoryQuery(categoryList, area: queryArea)
         let searchOptions = SearchOptions(languageCode: LanguageCode.enUs,
                                           maxItems: 30)
 

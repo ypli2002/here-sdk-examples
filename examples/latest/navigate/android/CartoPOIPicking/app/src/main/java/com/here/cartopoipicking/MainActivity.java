@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 
 package com.here.cartopoipicking;
 
+import android.content.Context;
 import android.os.Bundle;
 import android.util.Log;
 
@@ -33,21 +34,28 @@ import com.here.sdk.core.LanguageCode;
 import com.here.sdk.core.Point2D;
 import com.here.sdk.core.Rectangle2D;
 import com.here.sdk.core.Size2D;
+import com.here.sdk.core.engine.SDKNativeEngine;
+import com.here.sdk.core.engine.SDKOptions;
 import com.here.sdk.core.errors.InstantiationErrorException;
 import com.here.sdk.gestures.TapListener;
 import com.here.sdk.mapview.MapError;
+import com.here.sdk.mapview.MapFeatureModes;
+import com.here.sdk.mapview.MapFeatures;
+import com.here.sdk.mapview.MapMeasure;
 import com.here.sdk.mapview.MapScene;
 import com.here.sdk.mapview.MapScheme;
 import com.here.sdk.mapview.MapView;
 import com.here.sdk.mapview.MapViewBase;
-import com.here.sdk.mapview.PickMapFeaturesResult;
+import com.here.sdk.mapview.PickMapContentResult;
 import com.here.sdk.search.OfflineSearchEngine;
 import com.here.sdk.search.Place;
 import com.here.sdk.search.PlaceIdQuery;
 import com.here.sdk.search.PlaceIdSearchCallback;
 import com.here.sdk.search.SearchError;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 public class MainActivity extends AppCompatActivity {
@@ -61,6 +69,10 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Usually, you need to initialize the HERE SDK only once during the lifetime of an application.
+        initializeHERESDK();
+
         setContentView(R.layout.activity_main);
 
         // Get a MapView instance from the layout.
@@ -68,6 +80,19 @@ public class MainActivity extends AppCompatActivity {
         mapView.onCreate(savedInstanceState);
 
         handleAndroidPermissions();
+    }
+
+    private void initializeHERESDK() {
+        // Set your credentials for the HERE SDK.
+        String accessKeyID = "YOUR_ACCESS_KEY_ID";
+        String accessKeySecret = "YOUR_ACCESS_KEY_SECRET";
+        SDKOptions options = new SDKOptions(accessKeyID, accessKeySecret);
+        try {
+            Context context = this;
+            SDKNativeEngine.makeSharedInstance(context, options);
+        } catch (InstantiationErrorException e) {
+            throw new RuntimeException("Initialization of HERE SDK failed: " + e.error.name());
+        }
     }
 
     private void handleAndroidPermissions() {
@@ -99,8 +124,9 @@ public class MainActivity extends AppCompatActivity {
             public void onLoadScene(@Nullable MapError mapError) {
                 if (mapError == null) {
                     double distanceInMeters = 1000 * 10;
+                    MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, distanceInMeters);
                     mapView.getCamera().lookAt(
-                            new GeoCoordinates(52.520798, 13.409408), distanceInMeters);
+                            new GeoCoordinates(52.520798, 13.409408), mapMeasureZoom);
                     startExample();
                 } else {
                     Log.d(TAG, "Loading map failed: mapError: " + mapError.name());
@@ -110,8 +136,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startExample() {
-        showDialog("Tap on Carto POIs",
-                "This app show how to pick embedded markers on the map, such as subway stations and ATMs.");
+        showDialog("Tap on Map Content",
+                "This app shows how to pick vehicle restrictions and embedded markers on the map, such as subway stations and ATMs.");
+
+        enableVehicleRestrictionsOnMap();
 
         try {
             // Allows to search on already downloaded or cached map data.
@@ -120,45 +148,57 @@ public class MainActivity extends AppCompatActivity {
             throw new RuntimeException("Initialization of OfflineSearchEngine failed: " + e.error.name());
         }
 
-        // Setting a tap handler to pick embedded carto POIs from map.
+        // Setting a tap handler to pick embedded map content.
         setTapGestureHandler();
+    }
+
+    private void enableVehicleRestrictionsOnMap() {
+        Map<String, String> mapFeatures = new HashMap<>();
+        mapFeatures.put(MapFeatures.VEHICLE_RESTRICTIONS,
+                        MapFeatureModes.VEHICLE_RESTRICTIONS_ACTIVE_AND_INACTIVE_DIFFERENTIATED);
+        mapView.getMapScene().enableFeatures(mapFeatures);
     }
 
     private void setTapGestureHandler() {
         mapView.getGestures().setTapListener(new TapListener() {
             @Override
             public void onTap(@NonNull Point2D touchPoint) {
-                pickMapMarker(touchPoint);
+                pickMapContent(touchPoint);
             }
         });
     }
 
-    private void pickMapMarker(final Point2D touchPoint) {
-        // You can also use a larger area to include multiple carto POIs.
-        Rectangle2D rectangle2D = new Rectangle2D(touchPoint, new Size2D(1, 1));
-        mapView.pickMapFeatures(rectangle2D, new MapViewBase.PickMapFeaturesCallback() {
+    private void pickMapContent(final Point2D touchPoint) {
+        // You can also use a larger area to include multiple map icons.
+        Rectangle2D rectangle2D = new Rectangle2D(touchPoint, new Size2D(50, 50));
+        mapView.pickMapContent(rectangle2D, new MapViewBase.PickMapContentCallback() {
             @Override
-            public void onPickMapFeature(@Nullable PickMapFeaturesResult pickMapFeaturesResult) {
-                if (pickMapFeaturesResult == null) {
-                    // An error occurred while performing the pick operation.
+            public void onPickMapContent(@Nullable PickMapContentResult pickMapContentResult) {
+                if (pickMapContentResult == null) {
+                    Log.e("onPickMapContent", "An error occurred while performing the pick operation.");
                     return;
                 }
 
-                List<PickMapFeaturesResult.PoiResult> cartoPOIList = pickMapFeaturesResult.getPois();
-                int listSize = cartoPOIList.size();
-                if (listSize == 0) {
-                    return;
-                }
-
-                PickMapFeaturesResult.PoiResult topmostCartoPOI = cartoPOIList.get(0);
-                showDialog("Carto POI picked:", topmostCartoPOI.name + ", Location: " +
-                        topmostCartoPOI.coordinates.latitude + ", " +
-                        topmostCartoPOI.coordinates.longitude + ". " +
-                        "See log for more place details.");
-
-                fetchCartoPOIDetails(topmostCartoPOI.offlineSearchId);
+                handlePickedCartoPOIs(pickMapContentResult.getPois());
+                handlePickedTrafficIncidents(pickMapContentResult.getTrafficIncidents());
+                handlePickedVehicleRestrictions(pickMapContentResult.getVehicleRestrictions());
             }
         });
+    }
+
+    private void handlePickedCartoPOIs(List<PickMapContentResult.PoiResult> cartoPOIList) {
+        int listSize = cartoPOIList.size();
+        if (listSize == 0) {
+            return;
+        }
+
+        PickMapContentResult.PoiResult topmostCartoPOI = cartoPOIList.get(0);
+        showDialog("Carto POI picked:", topmostCartoPOI.name + ", Location: " +
+                topmostCartoPOI.coordinates.latitude + ", " +
+                topmostCartoPOI.coordinates.longitude + ". " +
+                "See log for more place details.");
+
+        fetchCartoPOIDetails(topmostCartoPOI.offlineSearchId);
     }
 
     // The ID is only given for cached or downloaded maps data.
@@ -180,22 +220,73 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void handlePickedTrafficIncidents(List<PickMapContentResult.TrafficIncidentResult> trafficIndicents) {
+        // See Traffic example app.
+    }
+
+    private void handlePickedVehicleRestrictions(List<PickMapContentResult.VehicleRestrictionResult> vehicleRestrictions) {
+        int listSize = vehicleRestrictions.size();
+        if (listSize == 0) {
+            return;
+        }
+
+        // The text is non-translated and will vary depending on the region.
+        // For example, for a height restriction the text might be "5.5m" in Germany and "12'5"" in the US for a
+        // restriction of type "HEIGHT". An example for a "WEIGHT" restriction: "15t".
+        // The text might be empty, for example, in case of type "GENERAL_TRUCK_RESTRICTION", indicated by a "no-truck" sign.
+        PickMapContentResult.VehicleRestrictionResult topmostVehicleRestriction = vehicleRestrictions.get(0);
+        String text = topmostVehicleRestriction.text;
+        if (text.isEmpty()) {
+            text = "General vehicle restriction.";
+        }
+
+        showDialog("Vehicle restriction picked:", text + ", Location: " +
+                topmostVehicleRestriction.coordinates.latitude + ", " +
+                topmostVehicleRestriction.coordinates.longitude + ". " +
+                // A textual normed representation of the type.
+                "Type: " + topmostVehicleRestriction.restrictionType +
+                ". See log for more details.");
+
+        // GDF time domains format according to ISO 14825.
+        Log.d("VR TimeIntervals", topmostVehicleRestriction.timeIntervals);
+    }
+
     @Override
     protected void onPause() {
-        super.onPause();
         mapView.onPause();
+        super.onPause();
     }
 
     @Override
     protected void onResume() {
-        super.onResume();
         mapView.onResume();
+        super.onResume();
     }
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
         mapView.onDestroy();
+        disposeHERESDK();
+        super.onDestroy();
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        mapView.onSaveInstanceState(outState);
+        super.onSaveInstanceState(outState);
+    }
+    
+    private void disposeHERESDK() {
+        // Free HERE SDK resources before the application shuts down.
+        // Usually, this should be called only on application termination.
+        // Afterwards, the HERE SDK is no longer usable unless it is initialized again.
+        SDKNativeEngine sdkNativeEngine = SDKNativeEngine.getSharedInstance();
+        if (sdkNativeEngine != null) {
+            sdkNativeEngine.dispose();
+            // For safety reasons, we explicitly set the shared instance to null to avoid situations,
+            // where a disposed instance is accidentally reused.
+            SDKNativeEngine.setSharedInstance(null);
+        }
     }
 
     private void showDialog(String title, String message) {

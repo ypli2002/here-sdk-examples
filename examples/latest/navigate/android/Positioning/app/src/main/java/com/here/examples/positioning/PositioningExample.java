@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 HERE Europe B.V.
+ * Copyright (C) 2020-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@
 
 package com.here.examples.positioning;
 
-import android.content.Context;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -36,6 +35,7 @@ import com.here.sdk.location.LocationEngineStatus;
 import com.here.sdk.location.LocationFeature;
 import com.here.sdk.location.LocationStatusListener;
 import com.here.sdk.mapview.LocationIndicator;
+import com.here.sdk.mapview.MapMeasure;
 import com.here.sdk.mapview.MapView;
 
 import java.util.Date;
@@ -50,7 +50,6 @@ public class PositioningExample {
     private final GeoCoordinates defaultCoordinates = new GeoCoordinates(52.520798,13.409408);
 
     private MapView mapView;
-    private Context context;
     private LocationEngine locationEngine;
     private ConsentEngine consentEngine;
     private LocationIndicator locationIndicator;
@@ -76,9 +75,8 @@ public class PositioningExample {
         }
     };
 
-    public void onMapSceneLoaded(MapView mapView, Context context) {
+    public void onMapSceneLoaded(MapView mapView) {
         this.mapView = mapView;
-        this.context = context;
 
         try {
             consentEngine = new ConsentEngine();
@@ -116,11 +114,14 @@ public class PositioningExample {
     private void addMyLocationToMap(@NonNull Location myLocation) {
         //Create and setup location indicator.
         locationIndicator = new LocationIndicator();
+        // Enable a halo to indicate the horizontal accuracy.
+        locationIndicator.setAccuracyVisualized(true);
         locationIndicator.setLocationIndicatorStyle(LocationIndicator.IndicatorStyle.PEDESTRIAN);
         locationIndicator.updateLocation(myLocation);
         mapView.addLifecycleListener(locationIndicator);
         //Update the map viewport to be centered on the location.
-        mapView.getCamera().lookAt(myLocation.coordinates, CAMERA_DISTANCE_IN_METERS);
+        MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, CAMERA_DISTANCE_IN_METERS);
+        mapView.getCamera().lookAt(myLocation.coordinates, mapMeasureZoom);
     }
 
     private void updateMyLocationOnMap(@NonNull Location myLocation) {

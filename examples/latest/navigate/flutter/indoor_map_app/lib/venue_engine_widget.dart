@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020-2022 HERE Europe B.V.
+ * Copyright (C) 2020-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,19 +19,19 @@
 
 import 'package:flutter/material.dart';
 import 'package:here_sdk/core.dart';
+import 'package:here_sdk/core.engine.dart';
 import 'package:here_sdk/gestures.dart';
 import 'package:here_sdk/venue.data.dart';
 import 'package:indoor_map_app/drawing_switcher.dart';
-import 'package:indoor_map_app/indoor_routing_widget.dart';
 import 'package:indoor_map_app/level_switcher.dart';
 import 'package:here_sdk/mapview.dart';
 import 'package:here_sdk/venue.control.dart';
 import 'package:here_sdk/venue.dart';
 import 'package:here_sdk/venue.service.dart';
+import 'package:indoor_map_app/main.dart';
 import 'package:indoor_map_app/venue_search_controller.dart';
 import 'package:indoor_map_app/venue_tap_controller.dart';
-import 'package:indoor_map_app/venues_controller.dart';
-
+import 'events.dart';
 import 'geometry_info.dart';
 
 class VenueEngineWidget extends StatefulWidget {
@@ -48,7 +48,6 @@ class VenueEngineWidget extends StatefulWidget {
 class VenueEngineState extends State<VenueEngineWidget> {
   HereMapController? _hereMapController;
   VenueEngine? _venueEngine;
-  IndoorRoutingState? _indoorRoutingState;
   GeometryInfoState? _geometryInfoState;
   late VenueServiceListener _serviceListener;
   late VenueSelectionListener _venueSelectionListener;
@@ -57,11 +56,15 @@ class VenueEngineState extends State<VenueEngineWidget> {
   late VenueLifecycleListenerImpl _venueLifecycleListener;
   VenueTapController? _venueTapController;
   VenueTapListenerImpl? _tapListener;
-  VenueLongPressListenerImpl? _longPressListener;
   final _drawingSwitcherState = DrawingSwitcherState();
   final _levelSwitcherState = LevelSwitcherState();
   final _venueSearchState = VenueSearchControllerState();
-  final _venuesState = VenuesControllerState();
+
+  // Set value for hrn with your platform catalog HRN value if you want to load non default collection.
+  String HRN = "YOUR_CATALOG_HRN";
+
+  //Label text preference as per user choice
+  final List<String> _labelPref = ["OCCUPANT_NAMES", "SPACE_NAME", "INTERNAL_ADDRESS"];
 
   @override
   Widget build(BuildContext context) {
@@ -72,9 +75,16 @@ class VenueEngineState extends State<VenueEngineWidget> {
       LevelSwitcher(state: _levelSwitcherState),
       // Add a venue search controller.
       VenueSearchController(state: _venueSearchState),
-      // Add a venues controller.
-      VenuesController(state: _venuesState),
     ]);
+  }
+
+  @override
+  void dispose() {
+    // Free HERE SDK resources before the application shuts down.
+    SDKNativeEngine.sharedInstance?.dispose();
+    SdkContext.release();
+
+    super.dispose();
   }
 
   VenueEngine? get venueEngine => _venueEngine;
@@ -83,29 +93,81 @@ class VenueEngineState extends State<VenueEngineWidget> {
     return _venueSearchState;
   }
 
-  VenuesControllerState getVenuesControllerState() {
-    return _venuesState;
-  }
-
-  set(HereMapController hereMapController, VenueEngine venueEngine, IndoorRoutingState indoorRoutingState,
+  set(HereMapController hereMapController, VenueEngine venueEngine,
       GeometryInfoState geometryInfoState) {
     _hereMapController = hereMapController;
     _venueEngine = venueEngine;
-    _indoorRoutingState = indoorRoutingState;
     _geometryInfoState = geometryInfoState;
   }
 
   selectVenue(int venueId) {
     if (_venueEngine != null) {
       // Select venue by ID.
-      _venueEngine!.venueMap.selectVenueAsync(venueId);
+      _venueEngine!.venueMap.selectVenueAsyncWithErrors(venueId, (VenueErrorCode? venueLoadError) {
+        String errorMsg;
+        switch(venueLoadError) {
+          case VenueErrorCode.noNetwork:
+            errorMsg = "The device has no internet connectivity";
+            break;
+          case VenueErrorCode.noMetaDataFound:
+            errorMsg = "Meta data not present in platform collection catalog";
+            break;
+          case VenueErrorCode.hrnMissing:
+            errorMsg = "HRN not provided. Please insert HRN";
+            break;
+          case VenueErrorCode.hrnMismatch:
+            errorMsg = "HRN does not match with Auth key & secret";
+            break;
+          case VenueErrorCode.noDefaultCollection:
+            errorMsg = "Default collection missing from platform collection catalog";
+            break;
+          case VenueErrorCode.mapIdNotFound:
+            errorMsg = "Map ID requested is not part of the default collection";
+            break;
+          case VenueErrorCode.mapDataIncorrect:
+            errorMsg = "Map data in collection is wrong";
+            break;
+          case VenueErrorCode.internalServerError:
+            errorMsg = "Internal Server Error";
+            break;
+          case VenueErrorCode.serviceUnavailable:
+            errorMsg = "Requested service is not available currently. Please try after some time";
+            break;
+          default:
+            errorMsg = "Unknown Error encountered";
+        }
+
+        // set up the button
+        Widget okButton = TextButton(
+          child: Text("OK"),
+          onPressed: () { Navigator.of(context, rootNavigator: true).pop('dialog'); },
+        );
+
+        // set up the AlertDialog
+        AlertDialog alert = AlertDialog(
+          title: Text("Attention"),
+          content: Text(errorMsg),
+          actions: [
+            okButton,
+          ],
+        );
+
+        // show the dialog
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return alert;
+          },
+        );
+
+      });
     }
   }
 
   onVenueEngineCreated() {
     var venueMap = venueEngine!.venueMap;
     // Add needed listeners.
-    _serviceListener = VenueServiceListenerImpl();
+    _serviceListener = VenueServiceListenerImpl(this);
     _venueEngine!.venueService.addServiceListener(_serviceListener);
     _venueSelectionListener = VenueSelectionListenerImpl(this);
     _drawingSelectionListener = DrawingSelectionListenerImpl(this);
@@ -118,19 +180,24 @@ class VenueEngineState extends State<VenueEngineWidget> {
     // Create a venue tap controller.
     _venueTapController = VenueTapController(
         hereMapController: _hereMapController, venueMap: venueMap, geometryInfoState: _geometryInfoState);
-    _indoorRoutingState!.set(_hereMapController, venueEngine!);
-    _tapListener = VenueTapListenerImpl(_indoorRoutingState, _venueTapController);
-    _longPressListener = VenueLongPressListenerImpl(_indoorRoutingState);
+    _tapListener = VenueTapListenerImpl(_venueTapController);
+
     // Set a tap listener.
     _hereMapController!.gestures.tapListener = _tapListener;
-    _hereMapController!.gestures.longPressListener = _longPressListener;
     _venueSearchState.set(_venueTapController);
-    _venuesState.set(venueMap);
     // Start VenueEngine. Once authentication is done, the authentication
     // callback will be triggered. Afterwards, VenueEngine will start
     // VenueService. Once VenueService is initialized,
     // VenueServiceListener.onInitializationCompleted method will be called.
     venueEngine!.start(_onAuthCallback);
+
+    if ((HRN != "") && (HRN != "YOUR_CATALOG_HRN")) {
+      // Set platform catalog HRN
+      venueEngine!.venueService.setHrn(HRN);
+    }
+
+    // Set label text preference
+    venueEngine!.venueService.setLabeltextPreference(_labelPref);
   }
 
   _onAuthCallback(AuthenticationError? error, AuthenticationData? data) {
@@ -147,6 +214,7 @@ class VenueEngineState extends State<VenueEngineWidget> {
     }
     // Update the selected drawing with a new selected venue.
     onDrawingSelectionChanged(selectedVenue);
+    mapLoading.isMapLoading.value = true;
   }
 
   onDrawingSelectionChanged(Venue? selectedVenue) {
@@ -165,15 +233,71 @@ class VenueEngineState extends State<VenueEngineWidget> {
 
   onVenuesChanged() {
     onVenueSelectionChanged(_venueEngine!.venueMap.selectedVenue);
-    _venuesState.setState(() {});
+    mapLoading.isMapLoading.value = true;
   }
 }
 
 // Listener for the VenueService event.
 class VenueServiceListenerImpl implements VenueServiceListener {
+  late VenueEngineState _venueEngineState;
+  late List<String> list = <String>["Venue Id"];
+
+  VenueServiceListenerImpl(VenueEngineState venueEngineState) {
+    _venueEngineState = venueEngineState;
+  }
+
   @override
   onInitializationCompleted(VenueServiceInitStatus result) {
-    if (result != VenueServiceInitStatus.onlineSuccess) {
+    if (result == VenueServiceInitStatus.onlineSuccess) {
+      //Get List of venues info
+      List<VenueInfo> venueInfo =
+      _venueEngineState!._venueEngine!.venueMap.getVenueInfoListWithErrors((VenueErrorCode? venueLoadError) {
+        String errorMsg;
+        switch(venueLoadError) {
+          case VenueErrorCode.noNetwork:
+            errorMsg = "The device has no internet connectivity";
+            break;
+          case VenueErrorCode.noMetaDataFound:
+            errorMsg = "Meta data not present in platform collection catalog";
+            break;
+          case VenueErrorCode.hrnMissing:
+            errorMsg = "HRN not provided. Please insert HRN";
+            break;
+          case VenueErrorCode.hrnMismatch:
+            errorMsg = "HRN does not match with Auth key & secret";
+            break;
+          case VenueErrorCode.noDefaultCollection:
+            errorMsg = "Default collection missing from platform collection catalog";
+            break;
+          case VenueErrorCode.mapIdNotFound:
+            errorMsg = "Map ID requested is not part of the default collection";
+            break;
+          case VenueErrorCode.mapDataIncorrect:
+            errorMsg = "Map data in collection is wrong";
+            break;
+          case VenueErrorCode.internalServerError:
+            errorMsg = "Internal Server Error";
+            break;
+          case VenueErrorCode.serviceUnavailable:
+            errorMsg = "Requested service is not available currently. Please try after some time";
+            break;
+          case VenueErrorCode.noMapInCollection:
+            errorMsg = "No maps available in the collection";
+            break;
+          default:
+            errorMsg = "Unknown Error encountered";
+        }
+      });
+      for (int i = 0; i < venueInfo.length; i++) {
+        int venueId = venueInfo[i].venueId;
+        var updatedVenueIdList = venueInfo[i].venueIdentifier.substring(venueInfo[i].venueIdentifier.length - 5);
+        list.insert(i + 1, updatedVenueIdList);
+        print("list = " + list[i + 1]);
+        print("Venue Identifier: " + venueInfo[i].venueIdentifier + " Venue Id: $venueId" + " Venue Name: " + venueInfo[i].venueName);
+      }
+      listEventHandler.updatedList.value = list;
+      print("listEventHandler value = ${listEventHandler.updatedList.value}");
+    } else {
       print("VenueService failed to initialize!");
     }
   }
@@ -270,45 +394,16 @@ class VenueLifecycleListenerImpl implements VenueLifecycleListener {
 
 // A listener for the map tap event.
 class VenueTapListenerImpl implements TapListener {
-  IndoorRoutingState? _indoorRoutingState;
   VenueTapController? _tapController;
 
-  VenueTapListenerImpl(IndoorRoutingState? indoorRoutingState, VenueTapController? tapController) {
-    _indoorRoutingState = indoorRoutingState;
+  VenueTapListenerImpl(VenueTapController? tapController) {
     _tapController = tapController;
   }
 
   @override
   onTap(Point2D origin) {
-    if (_indoorRoutingState!.isEnabled) {
-      // In case if the indoor routing state is visible, set a destination point.
-      _indoorRoutingState!.setDestinationPoint(origin);
-    } else {
-      // Otherwise, redirect the event to the venue tap controller.
-      _tapController!.onTap(origin);
-    }
-  }
-
-  @override
-  void release() {
-    // Deprecated. Nothing to to here.
-  }
-}
-
-// A listener for the map long press event.
-class VenueLongPressListenerImpl implements LongPressListener {
-  IndoorRoutingState? _indoorRoutingState;
-
-  VenueLongPressListenerImpl(IndoorRoutingState? indoorRoutingState) {
-    _indoorRoutingState = indoorRoutingState;
-  }
-
-  @override
-  onLongPress(GestureState state, Point2D origin) {
-    if (_indoorRoutingState!.isEnabled) {
-      // In case if the indoor routing state is visible, set a start point.
-      _indoorRoutingState!.setStartPoint(origin);
-    }
+    // Otherwise, redirect the event to the venue tap controller.
+    _tapController!.onTap(origin);
   }
 
   @override

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,26 +21,32 @@ package com.here.mapitems;
 
 import android.content.Context;
 import android.graphics.Color;
+import android.util.Log;
+import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.here.sdk.core.Anchor2D;
-import com.here.sdk.core.GeoCircle;
 import com.here.sdk.core.GeoCoordinates;
-import com.here.sdk.core.GeoPolygon;
+import com.here.sdk.core.GeoCoordinatesUpdate;
 import com.here.sdk.mapview.MapCamera;
-import com.here.sdk.mapview.MapPolygon;
+import com.here.sdk.mapview.MapCameraAnimation;
+import com.here.sdk.mapview.MapCameraAnimationFactory;
+import com.here.sdk.mapview.MapImage;
+import com.here.sdk.mapview.MapImageFactory;
+import com.here.sdk.mapview.MapMarker;
+import com.here.sdk.mapview.MapMeasure;
 import com.here.sdk.mapview.MapView;
+import com.here.time.Duration;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class MapViewPinExample {
-
-    private static final double DISTANCE_IN_METERS = 1000 * 10;
+    private static final String TAG = MapViewPinExample.class.getSimpleName();
     private static final GeoCoordinates MAP_CENTER_GEO_COORDINATES = new GeoCoordinates(52.51760485151816, 13.380312380535472);
 
-    private Context context;
+    private final Context context;
     private final MapView mapView;
     private final MapCamera mapCamera;
 
@@ -49,15 +55,16 @@ public class MapViewPinExample {
         this.mapView = mapView;
         mapCamera = mapView.getCamera();
         double distanceToEarthInMeters = 7000;
-        mapCamera.lookAt(MAP_CENTER_GEO_COORDINATES, distanceToEarthInMeters);
+        MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, distanceToEarthInMeters);
+        mapCamera.lookAt(MAP_CENTER_GEO_COORDINATES, mapMeasureZoom);
 
         // Add circle to indicate map center.
-        addCirclePolygon(MAP_CENTER_GEO_COORDINATES);
+        addCircle(MAP_CENTER_GEO_COORDINATES);
     }
 
     public void showMapViewPin() {
         // Move map to expected location.
-        mapCamera.flyTo(MAP_CENTER_GEO_COORDINATES, DISTANCE_IN_METERS, new MapCamera.FlyToOptions());
+        flyTo(MAP_CENTER_GEO_COORDINATES);
 
         TextView textView = new TextView(context);
         textView.setTextColor(Color.parseColor("#FFFFFF"));
@@ -67,13 +74,19 @@ public class MapViewPinExample {
         linearLayout.setBackgroundResource(R.color.colorAccent);
         linearLayout.setPadding(10, 10, 10, 10);
         linearLayout.addView(textView);
+        linearLayout.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                Log.i(TAG, "Tapped on MapViewPin");
+            }
+        });
 
         mapView.pinView(linearLayout, MAP_CENTER_GEO_COORDINATES);
     }
 
     public void showAnchoredMapViewPin() {
         // Move map to expected location.
-        mapCamera.flyTo(MAP_CENTER_GEO_COORDINATES, DISTANCE_IN_METERS, new MapCamera.FlyToOptions());
+        flyTo(MAP_CENTER_GEO_COORDINATES);
 
         TextView textView = new TextView(context);
         textView.setTextColor(Color.parseColor("#FFFFFF"));
@@ -83,6 +96,12 @@ public class MapViewPinExample {
         linearLayout.setBackgroundResource(R.color.colorPrimary);
         linearLayout.setPadding(10, 10, 10, 10);
         linearLayout.addView(textView);
+        linearLayout.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                Log.i(TAG, "Tapped on Anchored MapViewPin");
+            }
+        });
 
         MapView.ViewPin viewPin = mapView.pinView(linearLayout, MAP_CENTER_GEO_COORDINATES);
         viewPin.setAnchorPoint(new Anchor2D(0.5F, 1));
@@ -95,18 +114,17 @@ public class MapViewPinExample {
         }
     }
 
-    private void addCirclePolygon(GeoCoordinates geoCoordinates) {
-        // Move map to expected location.
-        mapCamera.flyTo(MAP_CENTER_GEO_COORDINATES, DISTANCE_IN_METERS, new MapCamera.FlyToOptions());
+    private void addCircle(GeoCoordinates geoCoordinates) {
+        MapImage mapImage = MapImageFactory.fromResource(context.getResources(), R.drawable.circle);
+        MapMarker mapMarker = new MapMarker(geoCoordinates, mapImage);
+        mapView.getMapScene().addMapMarker(mapMarker);
+    }
 
-        float radiusInMeters = 50;
-        GeoCircle geoCircle = new GeoCircle(geoCoordinates, radiusInMeters);
-
-        GeoPolygon geoPolygon = new GeoPolygon(geoCircle);
-          com.here.sdk.core.Color fillColor =
-                com.here.sdk.core.Color.valueOf(0, 0.56f, 0.54f, 0.63f); // RGBA
-        MapPolygon mapPolygon = new MapPolygon(geoPolygon, fillColor);
-
-        mapView.getMapScene().addMapPolygon(mapPolygon);
+    private void flyTo(GeoCoordinates geoCoordinates) {
+        GeoCoordinatesUpdate geoCoordinatesUpdate = new GeoCoordinatesUpdate(geoCoordinates);
+        double bowFactor = 1;
+        MapCameraAnimation animation =
+                MapCameraAnimationFactory.flyTo(geoCoordinatesUpdate, bowFactor, Duration.ofSeconds(3));
+        mapCamera.startAnimation(animation);
     }
 }

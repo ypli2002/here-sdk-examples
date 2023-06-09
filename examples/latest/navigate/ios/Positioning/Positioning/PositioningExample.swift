@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 import heresdk
 import UIKit
 
-class PositioningExample: LocationDelegate, LocationStatusDelegate, LocationAuthorizationChangeDelegate {
+class PositioningExample: LocationDelegate, LocationStatusDelegate {
 
     private static let defaultGeoCoordinates = GeoCoordinates(latitude: 52.520798, longitude: 13.409408)
     private static let defaultCameraDistance = 1000.0
@@ -47,11 +47,10 @@ class PositioningExample: LocationDelegate, LocationStatusDelegate, LocationAuth
         if let lastLocation = locationEngine.lastKnownLocation {
             addMyLocationToMap(myLocation: lastLocation)
         } else {
-            let defaultLocation = Location(coordinates: PositioningExample.defaultGeoCoordinates,
-                                           timestamp: Date())
+            var defaultLocation = Location(coordinates: PositioningExample.defaultGeoCoordinates)
+            defaultLocation.time = Date()
             addMyLocationToMap(myLocation: defaultLocation)
         }
-        locationAuthorization.authorizationChangeDelegate = self
         startLocating()
     }
 
@@ -59,13 +58,15 @@ class PositioningExample: LocationDelegate, LocationStatusDelegate, LocationAuth
         stopLocating()
     }
 
-    func locationAuthorizatioChanged(granted: Bool) {
-        if granted {
-            startLocating()
-        }
+    func locationAuthorizatioChanged() {
+        startLocating()
     }
 
     private func startLocating() {
+        // Enable background updates.
+        locationEngine.setBackgroundLocationAllowed(allowed: true)
+        locationEngine.setBackgroundLocationIndicatorVisible(visible: true)
+        
         // Set delegates and start location engine.
         locationEngine.addLocationStatusDelegate(locationStatusDelegate: self)
         locationEngine.addLocationDelegate(locationDelegate: self)
@@ -101,12 +102,15 @@ class PositioningExample: LocationDelegate, LocationStatusDelegate, LocationAuth
     private func addMyLocationToMap(myLocation: Location) {
         // Setup location indicator.
         locationIndicator = LocationIndicator()
+        // Enable a halo to indicate the horizontal accuracy.
+        locationIndicator.isAccuracyVisualized = true
         locationIndicator.locationIndicatorStyle = .pedestrian;
         locationIndicator.updateLocation(myLocation)
         mapView.addLifecycleDelegate(locationIndicator)
         // Point camera to current location.
+        let distanceInMeters = MapMeasure(kind: .distance, value: PositioningExample.defaultCameraDistance)
         mapCamera.lookAt(point: myLocation.coordinates,
-                         distanceInMeters: PositioningExample.defaultCameraDistance)
+                         zoom: distanceInMeters)
     }
 
     private func updateMyLocationOnMap(myLocation: Location) {

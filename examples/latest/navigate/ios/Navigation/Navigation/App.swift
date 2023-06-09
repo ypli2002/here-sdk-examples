@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,8 +45,9 @@ class App : LongPressDelegate {
         self.mapView = mapView
         self.messageTextView = messageTextView
 
+        let distanceInMeters = MapMeasure(kind: .distance, value: ConstantsEnum.DEFAULT_DISTANCE_IN_METERS)
         mapView.camera.lookAt(point: ConstantsEnum.DEFAULT_MAP_CENTER,
-                              distanceInMeters: ConstantsEnum.DEFAULT_DISTANCE_IN_METERS)
+                              zoom: distanceInMeters)
 
         routeCalculator = RouteCalculator()
 

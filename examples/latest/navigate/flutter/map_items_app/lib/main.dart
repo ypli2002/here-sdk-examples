@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:here_sdk/core.dart';
+import 'package:here_sdk/core.engine.dart';
+import 'package:here_sdk/core.errors.dart';
 import 'package:here_sdk/mapview.dart';
 import 'package:map_items_app/MenuSectionExpansionTile.dart';
 
@@ -27,9 +29,27 @@ import 'MapObjectsExample.dart';
 import 'MapViewPinsExample.dart';
 
 void main() {
-  SdkContext.init(IsolateOrigin.main);
+  // Usually, you need to initialize the HERE SDK only once during the lifetime of an application.
+  _initializeHERESDK();
+
   // Ensure that all widgets, including MyApp, have a MaterialLocalizations object available.
   runApp(MaterialApp(home: MyApp()));
+}
+
+void _initializeHERESDK() async {
+  // Needs to be called before accessing SDKOptions to load necessary libraries.
+  SdkContext.init(IsolateOrigin.main);
+
+  // Set your credentials for the HERE SDK.
+  String accessKeyId = "YOUR_ACCESS_KEY_ID";
+  String accessKeySecret = "YOUR_ACCESS_KEY_SECRET";
+  SDKOptions sdkOptions = SDKOptions.withAccessKeySecret(accessKeyId, accessKeySecret);
+
+  try {
+    await SDKNativeEngine.makeSharedInstance(sdkOptions);
+  } on InstantiationException {
+    throw Exception("Failed to initialize the HERE SDK.");
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -96,7 +116,11 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _flatMapMarkersButtonClicked() {
-    _mapItemsExample?.showFlatMapMarkers();
+    _mapItemsExample?.showFlatMapMarker();
+  }
+
+  void _2DTextureButtonClicked() {
+    _mapItemsExample?.show2DTexture();
   }
 
   void _mapMarkers3DButtonClicked() {
@@ -184,7 +208,8 @@ class _MyAppState extends State<MyApp> {
       MenuSectionItem("Anchored (2D)", _anchoredMapMarkersButtonClicked),
       MenuSectionItem("Centered (2D)", _centeredMapMarkersButtonClicked),
       MenuSectionItem("MapMarkerCluster", _mapMarkerClusterButtonClicked),
-      MenuSectionItem("Flat", _flatMapMarkersButtonClicked),
+      MenuSectionItem("Flat MapMarker", _flatMapMarkersButtonClicked),
+      MenuSectionItem("2DTexture", _2DTextureButtonClicked),
       MenuSectionItem("3D OBJ", _mapMarkers3DButtonClicked),
     ];
 
@@ -232,6 +257,14 @@ class _MyAppState extends State<MyApp> {
           Navigator.pop(context);
           _clearButtonClicked();
         });
+  }
+
+  @override
+  void dispose() {
+    // Free HERE SDK resources before the application shuts down.
+    SDKNativeEngine.sharedInstance?.dispose();
+    SdkContext.release();
+    super.dispose();
   }
 
   // A helper method to add a button on top of the HERE map.

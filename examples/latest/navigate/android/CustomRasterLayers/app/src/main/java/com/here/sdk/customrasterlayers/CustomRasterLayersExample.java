@@ -1,5 +1,5 @@
  /*
-  * Copyright (C) 2019-2022 HERE Europe B.V.
+  * Copyright (C) 2019-2023 HERE Europe B.V.
   *
   * Licensed under the Apache License, Version 2.0 (the "License");
   * you may not use this file except in compliance with the License.
@@ -19,35 +19,49 @@
 
  package com.here.sdk.customrasterlayers;
 
+ import android.content.Context;
+
+ import com.here.sdk.core.Anchor2D;
  import com.here.sdk.core.GeoCoordinates;
+ import com.here.sdk.core.Metadata;
  import com.here.sdk.mapview.MapCamera;
  import com.here.sdk.mapview.MapContentType;
+ import com.here.sdk.mapview.MapImage;
+ import com.here.sdk.mapview.MapImageFactory;
  import com.here.sdk.mapview.MapLayer;
  import com.here.sdk.mapview.MapLayerBuilder;
  import com.here.sdk.mapview.MapLayerPriority;
  import com.here.sdk.mapview.MapLayerPriorityBuilder;
  import com.here.sdk.mapview.MapLayerVisibilityRange;
+ import com.here.sdk.mapview.MapMarker;
+ import com.here.sdk.mapview.MapMeasure;
+ import com.here.sdk.mapview.MapScene;
  import com.here.sdk.mapview.MapView;
+ import com.here.sdk.mapview.VisibilityState;
  import com.here.sdk.mapview.datasource.RasterDataSource;
  import com.here.sdk.mapview.datasource.RasterDataSourceConfiguration;
  import com.here.sdk.mapview.datasource.TilingScheme;
 
+ import java.util.ArrayList;
  import java.util.Arrays;
  import java.util.List;
 
  public class CustomRasterLayersExample {
 
-     private static final float DEFAULT_DISTANCE_TO_EARTH_IN_METERS = 200 * 1000;
+     private static final float DEFAULT_DISTANCE_TO_EARTH_IN_METERS = 60 * 1000;
 
      private MapView mapView;
      private MapLayer rasterMapLayerTonerStyle;
      private RasterDataSource rasterDataSourceTonerStyle;
+     private Context context;
 
-     public void onMapSceneLoaded(MapView mapView) {
+     public void onMapSceneLoaded(MapView mapView, Context context) {
          this.mapView = mapView;
+         this.context = context;
 
          MapCamera camera = mapView.getCamera();
-         camera.lookAt(new GeoCoordinates(52.530932, 13.384915), DEFAULT_DISTANCE_TO_EARTH_IN_METERS);
+         MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, DEFAULT_DISTANCE_TO_EARTH_IN_METERS);
+         camera.lookAt(new GeoCoordinates(52.530932, 13.384915), mapMeasureZoom);
 
          String dataSourceName = "myRasterDataSourceTonerStyle";
          rasterDataSourceTonerStyle = createRasterDataSource(dataSourceName);
@@ -55,6 +69,13 @@
 
          // We want to start with the default map style.
          rasterMapLayerTonerStyle.setEnabled(false);
+
+         // Add a POI marker
+         addPOIMapMarker(new GeoCoordinates(52.530932, 13.384915));
+
+         // Users of the Navigate Edition can set the visibility for all the POI categories to hidden.
+         // List<String> categoryIds = new ArrayList<>();
+         // MapScene.setPoiVisibility(categoryIds, VisibilityState.HIDDEN);
      }
 
      public void enableButtonClicked() {
@@ -79,9 +100,12 @@
                  TilingScheme.QUAD_TREE_MERCATOR,
                  storageLevels);
 
+         // If you want to add transparent layers then set this to true.
+         rasterProviderConfig.hasAlphaChannel = false;
+
          // Raster tiles are stored in a separate cache on the device.
          String path = "cache/raster/toner";
-         long maxDiskSizeInBytes = 1024 * 1024 * 32;
+         long maxDiskSizeInBytes = 1024 * 1024 * 128; // 128
          RasterDataSourceConfiguration.Cache cacheConfig = new RasterDataSourceConfiguration.Cache(path, maxDiskSizeInBytes);
 
          // Note that this will make the raster source already known to the passed map view.
@@ -113,5 +137,16 @@
      public void onDestroy() {
          rasterMapLayerTonerStyle.destroy();
          rasterDataSourceTonerStyle.destroy();
+     }
+
+     private void addPOIMapMarker(GeoCoordinates geoCoordinates) {
+         MapImage mapImage = MapImageFactory.fromResource(context.getResources(), R.drawable.poi);
+
+         // The bottom, middle position should point to the location.
+         // By default, the anchor point is set to 0.5, 0.5.
+         Anchor2D anchor2D = new Anchor2D(0.5F, 1);
+         MapMarker mapMarker = new MapMarker(geoCoordinates, mapImage, anchor2D);
+
+         mapView.getMapScene().addMapMarker(mapMarker);
      }
  }

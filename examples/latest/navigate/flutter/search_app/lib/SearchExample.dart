@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -44,7 +44,8 @@ class SearchExample {
         _hereMapController = hereMapController,
         _camera = hereMapController.camera {
     double distanceToEarthInMeters = 10000;
-    _camera.lookAtPointWithDistance(GeoCoordinates(52.520798, 13.409408), distanceToEarthInMeters);
+    MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
+    _camera.lookAtPointWithMeasure(GeoCoordinates(52.520798, 13.409408), mapMeasureZoom);
 
     try {
       _searchEngine = SearchEngine();
@@ -80,7 +81,9 @@ class SearchExample {
   void _geocodeAnAddress() {
     // Move map to expected location.
     GeoCoordinates geoCoordinates = GeoCoordinates(52.53086, 13.38469);
-    _camera.flyTo(geoCoordinates);
+    double distanceToEarthInMeters = 1000 * 5;
+    MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
+    _camera.lookAtPointWithMeasure(geoCoordinates, mapMeasureZoom);
 
     String queryString = "Invalidenstraße 116, Berlin";
 
@@ -109,7 +112,7 @@ class SearchExample {
   }
 
   Future<void> _getAddressForCoordinates(GeoCoordinates geoCoordinates) async {
-    SearchOptions reverseGeocodingOptions = SearchOptions.withDefaults();
+    SearchOptions reverseGeocodingOptions = SearchOptions();
     reverseGeocodingOptions.languageCode = LanguageCode.enGb;
     reverseGeocodingOptions.maxItems = 1;
 
@@ -161,9 +164,10 @@ class SearchExample {
     _clearMap();
 
     GeoBox viewportGeoBox = _getMapViewGeoBox();
-    TextQuery query = TextQuery.withBoxArea(queryString, viewportGeoBox);
+    TextQueryArea queryArea = TextQueryArea.withBox(viewportGeoBox);
+    TextQuery query = TextQuery.withArea(queryString, queryArea);
 
-    SearchOptions searchOptions = SearchOptions.withDefaults();
+    SearchOptions searchOptions = SearchOptions();
     searchOptions.languageCode = LanguageCode.enUs;
     searchOptions.maxItems = 30;
 
@@ -190,31 +194,33 @@ class SearchExample {
   Future<void> _autoSuggestExample() async {
     GeoCoordinates centerGeoCoordinates = _getMapViewCenter();
 
-    SearchOptions searchOptions = SearchOptions.withDefaults();
+    SearchOptions searchOptions = SearchOptions();
     searchOptions.languageCode = LanguageCode.enUs;
     searchOptions.maxItems = 5;
 
+    TextQueryArea queryArea = TextQueryArea.withCenter(centerGeoCoordinates);
+
     // Simulate a user typing a search term.
     _searchEngine.suggest(
-        TextQuery.withAreaCenter(
+        TextQuery.withArea(
             "p", // User typed "p".
-            centerGeoCoordinates),
+            queryArea),
         searchOptions, (SearchError? searchError, List<Suggestion>? list) async {
       _handleSuggestionResults(searchError, list);
     });
 
     _searchEngine.suggest(
-        TextQuery.withAreaCenter(
+        TextQuery.withArea(
             "pi", // User typed "pi".
-            centerGeoCoordinates),
+            queryArea),
         searchOptions, (SearchError? searchError, List<Suggestion>? list) async {
       _handleSuggestionResults(searchError, list);
     });
 
     _searchEngine.suggest(
-        TextQuery.withAreaCenter(
+        TextQuery.withArea(
             "piz", // User typed "piz".
-            centerGeoCoordinates),
+            queryArea),
         searchOptions, (SearchError? searchError, List<Suggestion>? list) async {
       _handleSuggestionResults(searchError, list);
     });
@@ -246,7 +252,7 @@ class SearchExample {
 
     AddressQuery query = AddressQuery.withAreaCenter(queryString, geoCoordinates);
 
-    SearchOptions searchOptions = SearchOptions.withDefaults();
+    SearchOptions searchOptions = SearchOptions();
     searchOptions.languageCode = LanguageCode.deDe;
     searchOptions.maxItems = 30;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,32 +19,39 @@
 
 package com.here.offlinemaps;
 
-import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
-import com.google.android.material.snackbar.Snackbar;
 import android.util.Log;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+import com.google.android.material.snackbar.Snackbar;
+import com.here.sdk.BuildConfig;
 import com.here.sdk.core.GeoBox;
 import com.here.sdk.core.GeoCoordinates;
 import com.here.sdk.core.LanguageCode;
 import com.here.sdk.core.engine.SDKNativeEngine;
 import com.here.sdk.core.errors.InstantiationErrorException;
-import com.here.sdk.maploader.CheckMapUpdateCallback;
+import com.here.sdk.maploader.CatalogUpdateInfo;
+import com.here.sdk.maploader.CatalogUpdateProgressListener;
+import com.here.sdk.maploader.CatalogUpdateTask;
+import com.here.sdk.maploader.CatalogsUpdateInfoCallback;
 import com.here.sdk.maploader.DownloadRegionsStatusListener;
 import com.here.sdk.maploader.DownloadableRegionsCallback;
 import com.here.sdk.maploader.MapDownloader;
+import com.here.sdk.maploader.MapDownloaderConstructionCallback;
 import com.here.sdk.maploader.MapDownloaderTask;
 import com.here.sdk.maploader.MapLoaderError;
-import com.here.sdk.maploader.MapUpdateAvailability;
-import com.here.sdk.maploader.MapUpdateProgressListener;
-import com.here.sdk.maploader.MapUpdateTask;
+import com.here.sdk.maploader.MapLoaderException;
 import com.here.sdk.maploader.MapUpdater;
+import com.here.sdk.maploader.MapUpdaterConstructionCallback;
+import com.here.sdk.maploader.MapVersionHandle;
 import com.here.sdk.maploader.PersistentMapRepairError;
 import com.here.sdk.maploader.PersistentMapStatus;
 import com.here.sdk.maploader.Region;
 import com.here.sdk.maploader.RegionId;
 import com.here.sdk.maploader.RepairPersistentMapCallback;
 import com.here.sdk.mapview.MapCamera;
+import com.here.sdk.mapview.MapMeasure;
 import com.here.sdk.mapview.MapView;
 import com.here.sdk.search.OfflineSearchEngine;
 import com.here.sdk.search.Place;
@@ -60,27 +67,41 @@ import java.util.List;
 public class OfflineMapsExample {
 
     private final MapView mapView;
+    @Nullable
     private MapDownloader mapDownloader;
+    @Nullable
     private MapUpdater mapUpdater;
-    private OfflineSearchEngine offlineSearchEngine;
+    private final OfflineSearchEngine offlineSearchEngine;
     private List<Region> downloadableRegions = new ArrayList<>();
     private final List<MapDownloaderTask> mapDownloaderTasks = new ArrayList<>();
-    private Snackbar snackbar;
+    private final Snackbar snackbar;
 
     public OfflineMapsExample(MapView mapView) {
 
         // Configure the map.
         MapCamera camera = mapView.getCamera();
         double distanceInMeters = 1000 * 7;
-        camera.lookAt(new GeoCoordinates(52.530932, 13.384915), distanceInMeters);
+        MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, distanceInMeters);
+        camera.lookAt(new GeoCoordinates(52.530932, 13.384915), mapMeasureZoom);
 
         this.mapView = mapView;
 
-        SDKNativeEngine sdkNativeEngine = SDKNativeEngine.getSharedInstance();
+        try {
+            // Adding offline search engine to show that we can search on downloaded regions.
+            // Note that the engine cannot be used while a map update is in progress and an error will be indicated.
+            offlineSearchEngine = new OfflineSearchEngine();
+        } catch (InstantiationErrorException e) {
+            throw new RuntimeException("Initialization of OfflineSearchEngine failed: " + e.error.name());
+        }
 
+        SDKNativeEngine sdkNativeEngine = SDKNativeEngine.getSharedInstance();
         if (sdkNativeEngine == null) {
             throw new RuntimeException("SDKNativeEngine not initialized.");
         }
+
+        // Note that the default storage path can be adapted when creating a new SDKNativeEngine.
+        String storagePath = sdkNativeEngine.getOptions().cachePath;
+        Log.d("",  "StoragePath: " + storagePath);
 
         // In case you want to set a custom path for cache and map data, you can replace the
         // above initializtion of SDKNativeEngine with the code below using SDKOptions:
@@ -116,24 +137,34 @@ public class OfflineMapsExample {
             // always provide the path to external storage.
          */
 
-        mapDownloader = MapDownloader.fromEngine(sdkNativeEngine);
-        mapUpdater = MapUpdater.fromEngine(sdkNativeEngine);
+        MapDownloader.fromEngineAsync(sdkNativeEngine, new MapDownloaderConstructionCallback() {
+            @Override
+            public void onMapDownloaderConstructedCompleted(@NonNull MapDownloader mapDownloader) {
+                OfflineMapsExample.this.mapDownloader = mapDownloader;
 
-        try {
-            // Adding offline search engine to show that we can search on downloaded regions.
-            // Note that the engine cannot be used while a map update is in progress and an error will be indicated.
-            offlineSearchEngine = new OfflineSearchEngine();
-        } catch (InstantiationErrorException e) {
-            throw new RuntimeException("Initialization of OfflineSearchEngine failed: " + e.error.name());
-        }
+                // Checks the status of already downloaded map data and eventually repairs it.
+                // Important: For production-ready apps, it is recommended to not do such operations silently in
+                // the background and instead inform the user.
+                checkInstallationStatus();
+            }
+        });
 
-        // Note that the default storage path can be adapted when creating a new SDKNativeEngine.
-        String storagePath = sdkNativeEngine.getOptions().cachePath;
-        Log.d("",  "StoragePath: " + storagePath);
+        MapUpdater.fromEngineAsync(sdkNativeEngine, new MapUpdaterConstructionCallback() {
+            @Override
+            public void onMapUpdaterConstructe(@NonNull MapUpdater mapUpdater) {
+                OfflineMapsExample.this.mapUpdater = mapUpdater;
+                performUpdateChecks();
+            }
+        });
 
         String info = "This example allows to download the region Switzerland.";
         snackbar = Snackbar.make(mapView, info, Snackbar.LENGTH_INDEFINITE);
         snackbar.show();
+    }
+
+    private void performUpdateChecks() {
+        logHERESDKVersion();
+        logCurrentMapVersion();
 
         // Checks if map updates are available for any of the already downloaded maps.
         // If a new map download is started via MapDownloader during an update process,
@@ -145,14 +176,15 @@ public class OfflineMapsExample {
         // - By default, the update process should not be done while an app runs in background as then the
         // download can be interrupted by the OS.
         checkForMapUpdates();
-
-        // Checks the status of already downloaded map data and eventually repairs it.
-        // Important: For production-ready apps, it is recommended to not do such operations silently in
-        // the background and instead inform the user.
-        checkInstallationStatus();
     }
 
     public void onDownloadListClicked() {
+        if (mapDownloader == null) {
+            String message = "MapDownloader instance not ready. Try again.";
+            snackbar.setText(message).show();
+            return;
+        }
+
         // Download a list of Region items that will tell us what map regions are available for later download.
         mapDownloader.getDownloadableRegions(LanguageCode.DE_DE, new DownloadableRegionsCallback() {
             @Override
@@ -191,6 +223,12 @@ public class OfflineMapsExample {
     }
 
     public void onDownloadMapClicked() {
+        if (mapDownloader == null) {
+            String message = "MapDownloader instance not ready. Try again.";
+            snackbar.setText(message).show();
+            return;
+        }
+
         // Find region for Switzerland using the German name as identifier.
         // Note that we requested the list of regions in German above.
         String swizNameInGerman = "Schweiz";
@@ -281,6 +319,15 @@ public class OfflineMapsExample {
         mapDownloaderTasks.clear();
     }
 
+    public void onSwitchOnlineButtonClicked() {
+        SDKNativeEngine.getSharedInstance().setOfflineMode(false);
+        snackbar.setText("The app is allowed to go online.").show();
+    }
+    public void onSwitchOfflineButtonClicked() {
+        SDKNativeEngine.getSharedInstance().setOfflineMode(true);
+        snackbar.setText("The app is radio-silence.").show();
+    }
+
     // A test call that shows that, for example, search is possible on downloaded regions.
     // For this make sure you have successfully downloaded a region, device is offline and
     // the viewport shows a part of the region. Note: We need the OfflineSearchEngine, as
@@ -293,7 +340,8 @@ public class OfflineMapsExample {
             return;
         }
 
-        TextQuery textQuery = new TextQuery("restaurants", bbox);
+        TextQuery.Area queryArea = new TextQuery.Area(bbox);
+        TextQuery textQuery = new TextQuery("restaurants", queryArea);
 
         SearchOptions searchOptions = new SearchOptions();
         searchOptions.languageCode = LanguageCode.EN_US;
@@ -321,68 +369,104 @@ public class OfflineMapsExample {
     }
 
     private void checkForMapUpdates() {
-        mapUpdater.checkMapUpdate(new CheckMapUpdateCallback() {
+        if (mapUpdater == null) {
+            String message = "MapUpdater instance not ready. Try again.";
+            snackbar.setText(message).show();
+            return;
+        }
+
+        mapUpdater.retrieveCatalogsUpdateInfo(new CatalogsUpdateInfoCallback() {
             @Override
-            public void onCompleted(@Nullable MapLoaderError mapLoaderError, @Nullable MapUpdateAvailability mapUpdateAvailability) {
+            public void apply(@Nullable MapLoaderError mapLoaderError, @Nullable List<CatalogUpdateInfo> catalogList) {
                 if (mapLoaderError != null) {
-                    Log.e("MapUpdateCheck", "Error: " + mapLoaderError.name());
+                    Log.e("CatalogUpdateCheck", "Error: " + mapLoaderError.name());
                     return;
                 }
 
-                if (mapUpdateAvailability == MapUpdateAvailability.AVAILABLE) {
-                    Log.d("MapUpdateCheck", "One or more map updates are available.");
-                    performMapUpdate();
-                    return;
+                // When error is null, then the list is guaranteed to be not null.
+                if (catalogList.isEmpty()) {
+                    Log.d("CatalogUpdateCheck", "No map updates are available.");
                 }
 
-                Log.d("MapUpdateCheck", "No map update available. Latest versions are already installed.");
+                logCurrentMapVersion();
+
+                // Usually, only one global catalog is available that contains regions for the whole world.
+                // For some regions like Japan only a base map is available, by default.
+                // If your company has an agreement with HERE to use a detailed Japan map, then in this case you
+                // can install and use a second catalog that references the detailed Japan map data.
+                // All map data is part of downloadable regions. A catalog contains references to the
+                // available regions. The map data for a region may differ based on the catalog that is used
+                // or on the version that is downloaded and installed.
+                for (CatalogUpdateInfo catalogUpdateInfo : catalogList) {
+                    Log.d("CatalogUpdateCheck", "Catalog name:" + catalogUpdateInfo.installedCatalog.catalogIdentifier.hrn);
+                    Log.d("CatalogUpdateCheck", "Installed map version:" + catalogUpdateInfo.installedCatalog.catalogIdentifier.version);
+                    Log.d("CatalogUpdateCheck", "Latest available map version:" + catalogUpdateInfo.latestVersion);
+                    performMapUpdate(catalogUpdateInfo);
+                }
             }
         });
     }
 
     // Downloads and installs map updates for any of the already downloaded regions.
     // Note that this example only shows how to download one region.
-    private void performMapUpdate() {
-        // This method conveniently updates all installed regions if an update is available.
-        // Optionally, you can use the MapUpdateTask to pause / resume or cancel the update.
-        MapUpdateTask mapUpdateTask = mapUpdater.performMapUpdate(new MapUpdateProgressListener() {
+    private void performMapUpdate(CatalogUpdateInfo catalogUpdateInfo) {
+        if (mapUpdater == null) {
+            String message = "MapUpdater instance not ready. Try again.";
+            snackbar.setText(message).show();
+            return;
+        }
+
+        // This method conveniently updates all installed regions for a catalog if an update is available.
+        // Optionally, you can use the CatalogUpdateTask to pause / resume or cancel the update.
+        CatalogUpdateTask task = mapUpdater.updateCatalog(catalogUpdateInfo, new CatalogUpdateProgressListener() {
             @Override
             public void onProgress(@NonNull RegionId regionId, int percentage) {
-                Log.d("MapUpdate", "Downloading and installing a map update. Progress for " + regionId.id + ": " + percentage);
+                Log.d("CatalogUpdate", "Downloading and installing a map update. Progress for " + regionId.id + ": " + percentage);
             }
 
             @Override
             public void onPause(@Nullable MapLoaderError mapLoaderError) {
                 if (mapLoaderError == null) {
-                    String message = "The map update was paused by the user calling mapUpdateTask.pause().";
-                    Log.e("MapUpdate", message);
+                    String message = "The map update was paused by the user calling catalogUpdateTask.pause().";
+                    Log.e("CatalogUpdate", message);
                 } else {
                     String message = "Map update onPause error. The task tried to often to retry the update: " + mapLoaderError;
-                    Log.d("MapUpdate", message);
+                    Log.d("CatalogUpdate", message);
                 }
             }
 
             @Override
             public void onResume() {
                 String message = "A previously paused map update has been resumed.";
-                Log.d("MapUpdate", message);
+                Log.d("CatalogUpdate", message);
             }
 
             @Override
             public void onComplete(@Nullable MapLoaderError mapLoaderError) {
                 if (mapLoaderError != null) {
                     String message = "Map update completion error: " + mapLoaderError;
-                    Log.d("MapUpdate", message);
+                    Log.d("CatalogUpdate", message);
                     return;
                 }
 
                 String message = "One or more map update has been successfully installed.";
-                Log.d("MapUpdate", message);
-            }
-        });
+                Log.d("CatalogUpdate", message);
+                logCurrentMapVersion();
+
+                // It is recommend to call now also `getDownloadableRegions()` to update
+                // the internal catalog data that is needed to download, update or delete
+                // existing `Region` data. It is required to do this at least once
+                // before doing a new download, update or delete operation.
+            }});
     }
 
     private void checkInstallationStatus() {
+        if (mapDownloader == null) {
+            String message = "MapDownloader instance not ready. Try again.";
+            snackbar.setText(message).show();
+            return;
+        }
+
         // Note that this value will not change during the lifetime of an app.
         PersistentMapStatus persistentMapStatus = mapDownloader.getInitialPersistentMapStatus();
         if (persistentMapStatus != PersistentMapStatus.OK) {
@@ -399,9 +483,35 @@ public class OfflineMapsExample {
                         return;
                     }
 
+                    // In this case, check the PersistentMapStatus and the recommended
+                    // healing option listed in the API Reference. For example, if the status
+                    // is PENDING_UPDATE, it cannot be repaired, but instead an update
+                    // should be executed. It is recommended to inform your users to
+                    // perform the recommended action.               
                     Log.d("RepairPersistentMap", "Repair operation failed: " + persistentMapRepairError.name());
                 }
             });
+        }
+    }
+
+    private void logHERESDKVersion() {
+        Log.d("HERE SDK version: ", BuildConfig.VERSION_NAME);
+    }
+
+    private void logCurrentMapVersion() {
+        if (mapUpdater == null) {
+            String message = "MapUpdater instance not ready. Try again.";
+            snackbar.setText(message).show();
+            return;
+        }
+
+        try {
+            MapVersionHandle mapVersionHandle = mapUpdater.getCurrentMapVersion();
+            // Version string my look like "47.47,47.47".
+            Log.d("Installed map version: ", mapVersionHandle.stringRepresentation(","));
+        } catch (MapLoaderException e) {
+            MapLoaderError mapLoaderError = e.error;
+            Log.e("MapLoaderError", "Fetching current map version failed: " + mapLoaderError.toString());
         }
     }
 }

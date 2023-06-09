@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -41,8 +41,9 @@ class RoutingExample {
         self.viewController = viewController
         self.mapView = mapView
         let camera = mapView.camera
+        let distanceInMeters = MapMeasure(kind: .distance, value: 1000 * 10)
         camera.lookAt(point: GeoCoordinates(latitude: 52.520798, longitude: 13.409408),
-                      distanceInMeters: 1000 * 10)
+                      zoom: distanceInMeters)
 
         do {
             try routingEngine = RoutingEngine()
@@ -94,12 +95,18 @@ class RoutingExample {
                                                             60: 0.196,
                                                             90: 0.238]
 
-        // Ensure that the vehicle does not run out of energy along the way and charging stations are added as additional waypoints.
+        // Must be 0 for isoline calculation.
+        evCarOptions.routeOptions.alternatives = 0
+
+        // Ensure that the vehicle does not run out of energy along the way
+        // and charging stations are added as additional waypoints.
         evCarOptions.ensureReachability = true
 
-        // The below options are required when setting the ensureReachability option to true.
+        // The below options are required when setting the ensureReachability option to true
+        // (AvoidanceOptions need to be empty).
+        evCarOptions.avoidanceOptions = AvoidanceOptions()
+        evCarOptions.routeOptions.speedCapInMetersPerSecond = nil
         evCarOptions.routeOptions.optimizationMode = .fastest
-        evCarOptions.routeOptions.alternatives = 0
         evCarOptions.batterySpecifications.connectorTypes = [.tesla, .iec62196Type1Combo, .iec62196Type2Combo]
         evCarOptions.batterySpecifications.totalCapacityInKilowattHours = 80.0
         evCarOptions.batterySpecifications.initialChargeInKilowattHours = 10.0
@@ -145,8 +152,8 @@ class RoutingExample {
                 }
             }
 
-            print("Section \(sectionIndex): Estimated departure battery charge in kWh: \(String(describing: section.departurePlace.chargeInKilowattHours))")
-            print("Section \(sectionIndex): Estimated arrival battery charge in kWh: \(String(describing: section.arrivalPlace.chargeInKilowattHours))")
+            print("Section \(sectionIndex): Estimated battery charge in kWh when leaving the departure place: \(String(describing: section.departurePlace.chargeInKilowattHours))")
+            print("Section \(sectionIndex): Estimated battery charge in kWh when leaving the arrival place: \(String(describing: section.arrivalPlace.chargeInKilowattHours))")
 
             // Only charging stations that are needed to reach the destination are listed below.
             let depStation = section.departurePlace.chargingStation
@@ -180,7 +187,7 @@ class RoutingExample {
 
     private func showRouteOnMap(route: Route) {
         clearMap()
-        
+
         // Show route as polyline.
         let routeGeoPolyline = route.geometry
         let routeMapPolyline = MapPolyline(geometry: routeGeoPolyline,
@@ -194,7 +201,7 @@ class RoutingExample {
 
         let startPoint = route.sections.first!.departurePlace.mapMatchedCoordinates
         let destination = route.sections.last!.arrivalPlace.mapMatchedCoordinates
-        
+
         // Draw a circle to indicate starting point and destination.
         addCircleMapMarker(geoCoordinates: startPoint, imageName: "green_dot.png")
         addCircleMapMarker(geoCoordinates: destination, imageName: "green_dot.png")
@@ -206,9 +213,8 @@ class RoutingExample {
         // within a max distance of xx meters from any point of the route.
         let routeCorridor = GeoCorridor(polyline: route.geometry.vertices,
                                         halfWidthInMeters: Int32(200))
-        let textQuery = TextQuery("charging station",
-                                  in: routeCorridor,
-                                  near: mapView.camera.state.targetCoordinates)
+        let queryArea = TextQuery.Area(inCorridor: routeCorridor, near: mapView.camera.state.targetCoordinates)
+        let textQuery = TextQuery("charging station", area: queryArea)
 
         let searchOptions = SearchOptions(languageCode: LanguageCode.enUs,
                                           maxItems: 30)
@@ -253,6 +259,9 @@ class RoutingExample {
                 return
         }
 
+        // Clear previously added polygon area, if any.
+        clearIsolines()
+        
         // This finds the area that an electric vehicle can reach by consuming 400 Wh or less,
         // while trying to take the fastest possible route into any possible straight direction from start.
         // Note: We have specified evCarOptions.routeOptions.optimizationMode = .fastest for EV car options above.

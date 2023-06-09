@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,31 +19,47 @@
 
 package com.here.sdk.examples.venues;
 
+import android.content.Context;
+import android.content.DialogInterface;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.Spinner;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.here.sdk.core.GeoCoordinates;
+import com.here.sdk.core.engine.SDKNativeEngine;
+import com.here.sdk.core.engine.SDKOptions;
+import com.here.sdk.core.errors.InstantiationErrorException;
 import com.here.sdk.examples.venues.PermissionsRequestor.ResultListener;
 import com.here.sdk.gestures.TapListener;
-import com.here.sdk.mapview.MapScene;
+import com.here.sdk.mapview.MapFeatures;
+import com.here.sdk.mapview.MapMeasure;
 import com.here.sdk.mapview.MapScheme;
 import com.here.sdk.mapview.MapView;
-import com.here.sdk.mapview.VisibilityState;
 import com.here.sdk.venue.VenueEngine;
 import com.here.sdk.venue.control.Venue;
+import com.here.sdk.venue.control.VenueErrorCode;
 import com.here.sdk.venue.control.VenueMap;
 import com.here.sdk.venue.control.VenueSelectionListener;
+import com.here.sdk.venue.data.VenueGeometryFilterType;
+import com.here.sdk.venue.data.VenueInfo;
 import com.here.sdk.venue.service.VenueListener;
 import com.here.sdk.venue.service.VenueService;
 import com.here.sdk.venue.service.VenueServiceInitStatus;
 import com.here.sdk.venue.service.VenueServiceListener;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -51,18 +67,28 @@ public class MainActivity extends AppCompatActivity {
     private PermissionsRequestor permissionsRequestor;
     private MapView mapView;
     private VenueEngine venueEngine;
-    private EditText venueChooser;
     private Button goButton;
     private DrawingSwitcher drawingSwitcher;
     private LevelSwitcher levelSwitcher;
     private VenueTapController venueTapController;
     private VenueSearchController venueSearchController;
-    private IndoorRoutingUIController indoorRoutingController;
-    private VenuesController venuesController;
+    private Spinner venueInfoListSpinner;
+    private Integer[] venueInfoListItems;
+    private int selectedVenueId;
+
+    // Set value for hrn with your platform catalog HRN value if you wan    t to load non default collection.
+    private String HRN = "YOUR_CATALOG_HRN";
+
+    //Label text preference as per user choice
+    private final List<String> labelPref = Arrays.asList("OCCUPANT_NAMES", "SPACE_NAME", "INTERNAL_ADDRESS");
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Usually, you need to initialize the HERE SDK only once during the lifetime of an application.
+        initializeHERESDK();
+
         setContentView(R.layout.activity_main);
 
         // Get a MapView instance from the layout.
@@ -70,7 +96,7 @@ public class MainActivity extends AppCompatActivity {
         mapView.onCreate(savedInstanceState);
 
         // Get UI elements for selection venue by id.
-        venueChooser = findViewById(R.id.venueChooser);
+        venueInfoListSpinner = findViewById(R.id.VenueInfoList);
         goButton = findViewById(R.id.goButton);
 
         // Get drawing and level UI switchers.
@@ -78,6 +104,19 @@ public class MainActivity extends AppCompatActivity {
         levelSwitcher = findViewById(R.id.level_switcher);
 
         handleAndroidPermissions();
+    }
+
+    private void initializeHERESDK() {
+        // Set your credentials for the HERE SDK.
+        String accessKeyID = "VENUE_ACCESS_KEY_ID";
+        String accessKeySecret = "VENUE_ACCESS_KEY_SECRET";
+        SDKOptions options = new SDKOptions(accessKeyID, accessKeySecret);
+        try {
+            Context context = this;
+            SDKNativeEngine.makeSharedInstance(context, options);
+        } catch (InstantiationErrorException e) {
+            throw new RuntimeException("Initialization of HERE SDK failed: " + e.error.name());
+        }
     }
 
     private void handleAndroidPermissions() {
@@ -105,22 +144,42 @@ public class MainActivity extends AppCompatActivity {
         // Load a scene from the HERE SDK to render the map with a map scheme.
         mapView.getMapScene().loadScene(MapScheme.NORMAL_DAY, mapError -> {
             if (mapError == null) {
-                final double distanceInMeters = 1000 * 10;
+                double distanceInMeters = 1000 * 10;
+                MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, distanceInMeters);
                 mapView.getCamera().lookAt(
-                        new GeoCoordinates(52.530932, 13.384915), distanceInMeters);
+                        new GeoCoordinates(52.530932, 13.384915), mapMeasureZoom);
 
                 // Hide the extruded building layer, so that it does not overlap with the venues.
-                mapView.getMapScene().setLayerVisibility(MapScene.Layers.EXTRUDED_BUILDINGS,
-                        VisibilityState.HIDDEN);
+                List<String> mapFeatures = new ArrayList<>();
+                mapFeatures.add(MapFeatures.EXTRUDED_BUILDINGS);
+                mapView.getMapScene().disableFeatures(mapFeatures);
 
                 // Create a venue engine object. Once the initialization is done, a callback
                 // will be called.
-                venueEngine = new VenueEngine(this ::onVenueEngineInitCompleted);
+                try {
+                    venueEngine = new VenueEngine(this ::onVenueEngineInitCompleted);
+                } catch (InstantiationErrorException e) {
+                    Log.e(TAG, "SDK Engine instantiation failed");
+                    e.printStackTrace();
+                }
             } else {
                 Log.d(TAG, "Loading map failed: mapError: " + mapError.name());
             }
         });
     }
+
+    AdapterView.OnItemSelectedListener onVenueInfoListSelectedListener =
+            new AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                    selectedVenueId = (int) parent.getItemAtPosition(position);
+                }
+
+                @Override
+                public void onNothingSelected(AdapterView<?> parent) {
+                    Log.e(TAG, "Nothing Selected");
+                }
+            };
 
     private void onVenueEngineInitCompleted() {
         // Get VenueService and VenueMap objects.
@@ -139,18 +198,8 @@ public class MainActivity extends AppCompatActivity {
         venueSearchController = new VenueSearchController(venueMap, venueTapController,
                 findViewById(R.id.venueSearchLayout), findViewById(R.id.searchButton));
 
-        // Create a indoor routing controller
-        indoorRoutingController = new IndoorRoutingUIController(
-                venueEngine,
-                mapView,
-                findViewById(R.id.indoorRoutingLayout),
-                findViewById(R.id.indoorRoutingButton));
-
         // Set a tap listener.
         mapView.getGestures().setTapListener(tapListener);
-
-        venuesController = new VenuesController(venueMap, findViewById(R.id.venuesLayout),
-                findViewById(R.id.editVenuesButton));
 
         // Connect VenueMap to switchers, to control selected drawing and level in the UI.
         drawingSwitcher.setVenueMap(venueMap);
@@ -164,6 +213,14 @@ public class MainActivity extends AppCompatActivity {
                 Log.e(TAG, "Failed to authenticate, reason: " + authenticationError.value);
             }
         });
+
+        if ((HRN != "") && (HRN != "YOUR_CATALOG_HRN")) {
+            // Set platform catalog HRN
+            service.setHrn(HRN);
+        }
+
+        // Set label text preference
+        service.setLabeltextPreference(labelPref);
     }
 
     // Listener for the VenueService event.
@@ -171,6 +228,24 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onInitializationCompleted(@NonNull VenueServiceInitStatus result) {
             if (result == VenueServiceInitStatus.ONLINE_SUCCESS) {
+                try{
+                    List<VenueInfo> venueInfo = venueEngine.getVenueMap().getVenueInfoList(MainActivity.this::onVenueLoadError);
+                    venueInfoListItems = new Integer[venueInfo.size()];
+                    for (int i = 0; i< venueInfo.size(); i++) {
+                        Log.d(TAG, "Venue Identifier: " + venueInfo.get(i).getVenueIdentifier() + " Venue Id: "+venueInfo.get(i).getVenueId() + " Venue Name: "+venueInfo.get(i).getVenueName());
+                        venueInfoListItems[i] = venueInfo.get(i).getVenueId();
+                    }
+
+                    ArrayAdapter<Integer> adapter = new ArrayAdapter<>(MainActivity.this,
+                            android.R.layout.simple_spinner_dropdown_item, venueInfoListItems);
+                    adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+                    venueInfoListSpinner.setAdapter(adapter);
+                    venueInfoListSpinner.setOnItemSelectedListener(onVenueInfoListSelectedListener);
+                }
+                catch (Exception e) {
+                    Log.d(TAG, e.toString());
+                }
+
                 // Enable button for venue selection. From this moment the venue loading
                 // is available.
                 setGoButtonClickListener();
@@ -197,10 +272,11 @@ public class MainActivity extends AppCompatActivity {
                 if (selectedVenue != null) {
                     // Move camera to the selected venue.
                     GeoCoordinates venueCenter = selectedVenue.getVenueModel().getCenter();
-                    final double distanceInMeters = 500;
+                    double distanceInMeters = 500;
+                    MapMeasure mapMeasureZoom = new MapMeasure(MapMeasure.Kind.DISTANCE, distanceInMeters);
                     mapView.getCamera().lookAt(
                             new GeoCoordinates(venueCenter.latitude, venueCenter.longitude),
-                            distanceInMeters);
+                            mapMeasureZoom);
 
                     // Venue selection is done, enable back the button for the venue selection
                     // to be able to select another venue.
@@ -211,23 +287,74 @@ public class MainActivity extends AppCompatActivity {
     // Listener for the button which selects venues by id.
     private void setGoButtonClickListener() {
         goButton.setOnClickListener(v -> {
-            String venueString = venueChooser.getText().toString();
             try {
                 // Try to parse a venue id.
-                final int venueId = Integer.parseInt(venueString);
+                final int venueId = selectedVenueId;
                 VenueMap venueMap = venueEngine.getVenueMap();
                 Venue selectedVenue = venueMap.getSelectedVenue();
                 if (selectedVenue == null || selectedVenue.getVenueModel().getId() != venueId) {
                     // Disable the button while a venue loading and selection is in progress.
                     setGoButtonEnabled(false);
                     // Select a venue by id.
-                    venueMap.selectVenueAsync(venueId);
+                    venueMap.selectVenueAsync(venueId, this ::onVenueLoadError);
                 }
             } catch (Exception e) {
-                Log.d(TAG, e.toString());
+                Log.d(TAG, "No Maps Found. " + e.toString());
             }
             hideKeyboard();
         });
+    }
+
+    private void onVenueLoadError(VenueErrorCode venueLoadError) {
+        String errorMsg;
+        switch (venueLoadError) {
+            case NO_NETWORK:
+                errorMsg = "The device has no internet connectivity";
+                break;
+            case NO_META_DATA_FOUND:
+                errorMsg = "Meta data not present in platform collection catalog";
+                break;
+            case HRN_MISSING:
+                errorMsg = "HRN not provided. Please insert HRN";
+                break;
+            case HRN_MISMATCH:
+                errorMsg = "HRN does not match with Auth key & secret";
+                break;
+            case NO_DEFAULT_COLLECTION:
+                errorMsg = "Default collection missing from platform collection catalog";
+                break;
+            case MAP_ID_NOT_FOUND:
+                errorMsg = "Map ID requested is not part of the default collection";
+                break;
+            case MAP_DATA_INCORRECT:
+                errorMsg = "Map data in collection is wrong";
+                break;
+            case INTERNAL_SERVER_ERROR:
+                errorMsg = "Internal Server Error";
+                break;
+            case SERVICE_UNAVAILABLE:
+                errorMsg = "Requested service is not available currently. Please try after some time";
+                break;
+            case NO_MAP_IN_COLLECTION:
+                errorMsg = "No maps available in the collection";
+                break;
+            default:
+                errorMsg = "Unknown Error encountered";
+        }
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setMessage(errorMsg)
+                .setCancelable(true)
+                .setTitle("Attention")
+                .setPositiveButton("OK", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        dialog.dismiss();
+                    }
+                });
+        AlertDialog alert = builder.create();
+        alert.setCanceledOnTouchOutside(true);
+        alert.show();
     }
 
     // Hide a keyboard.
@@ -256,13 +383,8 @@ public class MainActivity extends AppCompatActivity {
 
     // Tap listener for MapView
     private final TapListener tapListener = origin -> {
-        if (indoorRoutingController.isVisible()) {
-            // In case if the indoor routing controller is visible, redirect the event to it.
-            indoorRoutingController.onTap(origin);
-        } else {
-            // Otherwise, redirect the event to the venue tap controller.
+            // Redirect the event to the venue tap controller.
             venueTapController.onTap(origin);
-        }
     };
 
     @Override
@@ -279,12 +401,34 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
         if (mapView != null) {
             mapView.getGestures().setTapListener(null);
             mapView.getGestures().setLongPressListener(null);
         }
-        venueEngine.destroy();
+        if(venueEngine != null) {
+            venueEngine.destroy();
+        }
         mapView.onDestroy();
+        disposeHERESDK();
+        super.onDestroy();
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        mapView.onSaveInstanceState(outState);
+        super.onSaveInstanceState(outState);
+    }
+    
+    private void disposeHERESDK() {
+        // Free HERE SDK resources before the application shuts down.
+        // Usually, this should be called only on application termination.
+        // Afterwards, the HERE SDK is no longer usable unless it is initialized again.
+        SDKNativeEngine sdkNativeEngine = SDKNativeEngine.getSharedInstance();
+        if (sdkNativeEngine != null) {
+            sdkNativeEngine.dispose();
+            // For safety reasons, we explicitly set the shared instance to null to avoid situations,
+            // where a disposed instance is accidentally reused.
+            SDKNativeEngine.setSharedInstance(null);
+        }
     }
 }

@@ -1,4 +1,4 @@
-The Navigation Quick Start example app shows how the HERE SDK can be set up to navigate to a location in the most simplest way.
+The Navigation Quick Start example app shows how the HERE SDK can be set up to navigate to a location in the most simplest way. It also shows how to properly handle screen orienation changes.
 
 Build instructions:
 -------------------
@@ -9,4 +9,4 @@ Note: If your AAR version is different than the version shown in the _Developer'
 
 2) Open Android Studio and sync the project.
 
-Please do not forget: To run the app, you need to add your HERE SDK credentials to the `AndroidManifest.xml` file. More information can be found in the _Get Started_ section of the _Developer's Guide_.
+Please do not forget: To run the app, you need to add your HERE SDK credentials to the `MainActivity.java` file. More information can be found in the _Get Started_ section of the _Developer's Guide_.

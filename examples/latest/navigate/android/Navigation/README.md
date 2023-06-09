@@ -1,4 +1,4 @@
-The Navigation example app shows how to calculate a route from A to B and how to start turn-by-turn navigation with voice commands. You can find how this is done in [NavigationExample.java](app/src/main/java/com/here/tracking/NavigationExample.java). It also shows how to set a tracking view when navigation is stopped.
+The Navigation example app shows how to calculate a route from A to B and how to start turn-by-turn navigation with voice commands. You can find how this is done in [NavigationExample.java](app/src/main/java/com/here/navigation/NavigationExample.java). It also shows how to set a tracking view when navigation is stopped.
 
 Build instructions:
 -------------------
@@ -9,4 +9,4 @@ Note: If your AAR version is different than the version shown in the _Developer'
 
 2) Open Android Studio and sync the project.
 
-Please do not forget: To run the app, you need to add your HERE SDK credentials to the `AndroidManifest.xml` file. More information can be found in the _Get Started_ section of the _Developer's Guide_.
+Please do not forget: To run the app, you need to add your HERE SDK credentials to the `MainActivity.java` file. More information can be found in the _Get Started_ section of the _Developer's Guide_.

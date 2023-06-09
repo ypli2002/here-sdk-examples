@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021-2022 HERE Europe B.V.
+ * Copyright (C) 2021-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License")
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:here_sdk/core.dart';
 import 'package:here_sdk/mapview.dart';
+import 'package:here_sdk/animation.dart';
 import 'package:here_sdk/routing.dart';
 import 'package:here_sdk/routing.dart' as here;
 
@@ -33,31 +34,34 @@ class PublicTransportRoutingExample {
   List<MapPolyline> _mapPolylines = [];
   late TransitRoutingEngine _transitRoutingEngine;
   final ShowDialogFunction _showDialog;
+  final _BERLIN_HQ_GEO_COORDINATES = GeoCoordinates(52.530971, 13.385088);
 
   PublicTransportRoutingExample(this._showDialog, this._hereMapController) {
     double distanceToEarthInMeters = 10000;
-    _hereMapController.camera.lookAtPointWithDistance(GeoCoordinates(52.520798, 13.409408), distanceToEarthInMeters);
+    MapMeasure mapMeasureZoom = MapMeasure(MapMeasureKind.distance, distanceToEarthInMeters);
+    _hereMapController.camera.lookAtPointWithMeasure(GeoCoordinates(52.520798, 13.409408), mapMeasureZoom);
 
     _transitRoutingEngine = TransitRoutingEngine();
   }
 
   Future<void> addTransitRoute() async {
-    var startGeoCoordinates = _createRandomGeoCoordinatesInViewport();
+    var startGeoCoordinates = _BERLIN_HQ_GEO_COORDINATES;
     var destinationGeoCoordinates = _createRandomGeoCoordinatesInViewport();
 
-    var startWaypoint = TransitWaypoint.withDefaults(startGeoCoordinates);
-    var destinationWaypoint = TransitWaypoint.withDefaults(destinationGeoCoordinates);
+    var startWaypoint = TransitWaypoint(startGeoCoordinates);
+    var destinationWaypoint = TransitWaypoint(destinationGeoCoordinates);
 
-    var options = TransitRouteOptions.withDefaults();
+    var options = TransitRouteOptions();
 
     _transitRoutingEngine.calculateRoute(startWaypoint, destinationWaypoint, options,
         (RoutingError? routingError, List<here.Route>? routeList) async {
       if (routingError == null) {
-        // Whenn error is null, the list is guaranteed to be non empty.
+        // When error is null, the list is guaranteed to be non empty.
         here.Route route = routeList!.first;
         _showRouteDetails(route);
         _showRouteOnMap(route);
         _logRouteViolations(route);
+        _animateToRoute(route);
 
         // Log maneuver instructions per route section.
         List<Section> sections = route.sections;
@@ -139,8 +143,9 @@ class PublicTransportRoutingExample {
   GeoCoordinates _createRandomGeoCoordinatesInViewport() {
     GeoBox? geoBox = _hereMapController.camera.boundingBox;
     if (geoBox == null) {
-      // Happens only when map is not fully covering the viewport.
-      return GeoCoordinates(52.530932, 13.384915);
+      // Happens only when map is not fully covering the viewport as the map is tilted.
+      print("The map view is tilted, falling back to fixed destination coordinate.");
+      return GeoCoordinates(52.520798, 13.409408);
     }
 
     GeoCoordinates northEast = geoBox.northEastCorner;
@@ -159,5 +164,23 @@ class PublicTransportRoutingExample {
 
   double _getRandom(double min, double max) {
     return min + Random().nextDouble() * (max - min);
+  }
+
+  void _animateToRoute(here.Route route) {
+    // The animation results in an untilted and unrotated map.
+    double bearing = 0;
+    double tilt = 0;
+    // We want to show the route fitting in the map view with an additional padding of 50 pixels.
+    Point2D origin = Point2D(50, 50);
+    Size2D sizeInPixels = Size2D(_hereMapController.viewportSize.width - 100, _hereMapController.viewportSize.height - 100);
+    Rectangle2D mapViewport = Rectangle2D(origin, sizeInPixels);
+
+    // Animate to the route within a duration of 3 seconds.
+    MapCameraUpdate update = MapCameraUpdateFactory.lookAtAreaWithGeoOrientationAndViewRectangle(route!.boundingBox,
+        GeoOrientationUpdate(bearing, tilt),
+        mapViewport);
+    MapCameraAnimation animation = MapCameraAnimationFactory.createAnimationFromUpdate(
+        update, const Duration(milliseconds: 3000), EasingFunction.inCubic);
+    _hereMapController.camera.startAnimation(animation);
   }
 }

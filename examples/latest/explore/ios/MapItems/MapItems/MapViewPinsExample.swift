@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2022 HERE Europe B.V.
+ * Copyright (C) 2019-2023 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,10 +31,11 @@ class MapViewPinsExample {
     init(mapView: MapView) {
         self.mapView = mapView
         mapCamera = mapView.camera
-        mapCamera.lookAt(point: mapCenterGeoCoordinates, distanceInMeters: 7000)
+        let distanceInMeters = MapMeasure(kind: .distance, value: 1000 * 7)
+        mapCamera.lookAt(point: mapCenterGeoCoordinates, zoom: distanceInMeters)
 
         // Add circle to indicate map center.
-        addCirclePolygon(mapCenterGeoCoordinates);
+        addCircle(mapCenterGeoCoordinates);
     }
 
     func onDefaultButtonClicked() {
@@ -51,8 +52,9 @@ class MapViewPinsExample {
 
     private func showMapViewPins() {
         // Move map to expected location.
-        mapCamera.flyTo(target: mapCenterGeoCoordinates, distanceInMeters: distanceInMeters, animationOptions: MapCamera.FlyToOptions())
+        flyTo(geoCoordinates: mapCenterGeoCoordinates)
         
+        let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(onMapViewPinTapped))
         let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 200, height: 40))
         textView.textAlignment = .center
         textView.isEditable = false
@@ -60,14 +62,21 @@ class MapViewPinsExample {
         textView.textColor = .white
         textView.font = .systemFont(ofSize: 17)
         textView.text = "Centered ViewPin"
+        textView.addGestureRecognizer(tapRecognizer)
 
         _ = mapView.pinView(textView, to: mapCenterGeoCoordinates)
+    }
+    
+    // This a handler for UITAPGestureRecognizer.
+    @objc func onMapViewPinTapped() {
+        print("Tapped on MapViewPin.")
     }
 
     private func showAnchoredMapViewPins() {
         // Move map to expected location.
-        mapCamera.flyTo(target: mapCenterGeoCoordinates, distanceInMeters: distanceInMeters, animationOptions: MapCamera.FlyToOptions())
+        flyTo(geoCoordinates: mapCenterGeoCoordinates)
         
+        let tapRecognizer = UITapGestureRecognizer(target: self, action: #selector(onAnchoredMapViewPinTapped))
         let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 200, height: 40))
         textView.textAlignment = .center
         textView.isEditable = false
@@ -76,8 +85,15 @@ class MapViewPinsExample {
         textView.font = .systemFont(ofSize: 17)
         textView.text = "Anchored ViewPin"
         textView.layer.anchorPoint = CGPoint(x: 0.5, y: 1)
+        textView.addGestureRecognizer(tapRecognizer)
 
         _ = mapView.pinView(textView, to: mapCenterGeoCoordinates)
+        
+    }
+    
+    // This a handler for UITAPGestureRecognizer.
+    @objc func onAnchoredMapViewPinTapped() {
+        print("Tapped on anchored MapViewPin.")
     }
 
     private func clearMap() {
@@ -86,17 +102,27 @@ class MapViewPinsExample {
         }
     }
 
-    private func addCirclePolygon(_ geoCoordinates: GeoCoordinates) {
-        // Move map to expected location.
-        mapCamera.flyTo(target: mapCenterGeoCoordinates, distanceInMeters: distanceInMeters, animationOptions: MapCamera.FlyToOptions())
-        
-        let geoCircle = GeoCircle(center: geoCoordinates,
-                                  radiusInMeters: 50.0)
+    private func addCircle(_ geoCoordinates: GeoCoordinates) {
+        guard
+            let image = UIImage(named: "circle.png"),
+            let imageData = image.pngData() else {
+                print("Error: Image not found.")
+                return
+        }
 
-        let geoPolygon = GeoPolygon(geoCircle: geoCircle)
-        let fillColor = UIColor(red: 0, green: 0.56, blue: 0.54, alpha: 0.63)
-        let mapPolygon = MapPolygon(geometry: geoPolygon, color: fillColor)
-
-        mapView.mapScene.addMapPolygon(mapPolygon)
+        let mapMarker = MapMarker(at: geoCoordinates,
+                                  image: MapImage(pixelData: imageData,
+                                                  imageFormat: ImageFormat.png))
+        mapView.mapScene.addMapMarker(mapMarker)
+    }
+    
+    private func flyTo(geoCoordinates: GeoCoordinates) {
+        let geoCoordinatesUpdate = GeoCoordinatesUpdate(geoCoordinates)
+        let durationInSeconds: TimeInterval = 3
+        let animation = MapCameraAnimationFactory.flyTo(target: geoCoordinatesUpdate,
+                                                        bowFactor: 1,
+                                                        duration: durationInSeconds)
+        mapCamera.startAnimation(animation)
     }
 }
+
